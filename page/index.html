@@ -3,17 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="title" content="Wave Forcing: Towards Speed-of-Light Streaming Video Generation">
-  <meta name="description" content="Wave Forcing turns sequential rolling-forcing video generation into a GPU wavefront, overlapping denoising and streaming VAE decoding.">
+  <meta name="title" content="Wave Your Streaming Video to Speed-of-Light">
+  <meta name="description" content="Wave Forcing keeps Rolling Forcing's live mixed-noise frontier, removes reverse inter-chunk edges, and turns the resulting directed graph into a GPU wavefront with overlapped KV transport.">
   <meta name="keywords" content="video generation, diffusion, rolling forcing, pipeline parallelism, wavefront, streaming inference">
   <meta name="author" content="MLSys Team, DENG Lab at Shanghai Jiao Tong University">
   <meta name="theme-color" content="#07111f">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="DENG Lab @ SJTU">
-  <meta property="og:title" content="Wave Forcing: Towards Speed-of-Light Streaming Video Generation">
-  <meta property="og:description" content="A wavefront runtime for high-throughput streaming video generation.">
-  <title>Wave Forcing — DENG Lab @ SJTU</title>
-  <link rel="icon" type="image/x-icon" href="static/images/favicon.ico">
+  <meta property="og:title" content="Wave Your Streaming Video to Speed-of-Light">
+  <meta property="og:description" content="Wave Forcing × Wave Parallel for speed-of-light streaming video generation.">
+  <title>Wave Your Streaming Video to Speed-of-Light — DENG Lab @ SJTU</title>
+  <link rel="icon" type="image/svg+xml" href="static/images/wave-forcing-logo.svg">
+  <link rel="alternate icon" type="image/x-icon" href="static/images/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -22,7 +23,7 @@
 <body>
   <nav class="topbar" aria-label="Main navigation">
     <a class="brand" href="#top" aria-label="Wave Forcing home">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <img class="brand-mark" src="static/images/wave-forcing-logo.svg" alt="">
       <span>Wave Forcing</span>
     </a>
     <div class="nav-links">
@@ -41,25 +42,41 @@
       <div class="hero-glow glow-two"></div>
       <div class="hero-copy reveal">
         <div class="lab-lockup">
-          <img src="static/images/sjtu-logo-only.png" alt="Shanghai Jiao Tong University">
-          <span>DENG Lab · MLSys</span>
+          <div class="lab-logos">
+            <a class="sjtu-logo" href="https://www.sjtu.edu.cn/" target="_blank" rel="noopener" aria-label="Shanghai Jiao Tong University">
+              <img src="static/images/sjtu-logo-only.png" alt="Shanghai Jiao Tong University">
+            </a>
+            <a class="deng-logo" href="https://sjtu-deng-lab.github.io/home/" target="_blank" rel="noopener" aria-label="DENG Lab">
+              <img src="static/images/sjtu-deng-lab.png" alt="DENG Lab">
+            </a>
+          </div>
+          <span class="lab-affiliations">
+            <a href="https://sjtu-deng-lab.github.io/home/" target="_blank" rel="noopener">DENG Lab ↗</a>
+            <i>·</i>
+            <a href="https://github.com/orgs/SJTU-DENG-Lab/teams/deng-lab-mlsys" target="_blank" rel="noopener">MLSys Team ↗</a>
+          </span>
         </div>
-        <p class="eyebrow"><span class="live-dot"></span> Streaming video, re-architected</p>
-        <h1>Generate video<br>at the speed of a <em>wave.</em></h1>
-        <p class="hero-lede">Wave Forcing maps consecutive denoising steps onto different GPUs, then streams completed chunks directly into a parallel VAE. After the pipeline fills, a new video chunk emerges every tick.</p>
+        <p class="eyebrow"><span class="live-dot"></span> Wave Forcing</p>
+        <h1><span class="wave-word">Wave</span> Your<br>Streaming Video<span class="speed-line">to <em>Speed-of-Light.</em></span></h1>
+        <p class="hero-lede"><strong>Wave Forcing</strong> keeps Rolling Forcing's mixed-noise schedule, but makes cross-chunk attention block-causal. <strong>Wave Runtime</strong> executes this DAG through Wave Parallelism: full-model GPU replicas hide one-way KV communication and stream completed chunks through a balanced VAE pipeline.</p>
         <div class="hero-actions">
           <a class="button primary" href="#explorer">Run the pipeline</a>
           <a class="button secondary" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">View code <span>↗</span></a>
         </div>
         <div class="hero-metrics" aria-label="Headline results">
-          <div><strong>99.8</strong><span>frames / second</span></div>
-          <div><strong>6.2×</strong><span>faster than realtime</span></div>
-          <div><strong>8</strong><span>H200 GPUs</span></div>
+          <div class="fps-metric e2e-metric"><strong>117.7 <i>E2E FPS</i></strong><span>≈13.56 s · full 1596-frame pipeline</span></div>
+          <div class="fps-metric steady-metric"><strong>125.7 <i>FPS(p50)</i></strong><span>best E2E config · pooled steady ticks</span></div>
+          <div><strong>7.9×</strong><span>vs single-GPU E2E</span></div>
         </div>
       </div>
       <div class="hero-visual reveal" aria-hidden="true">
         <div class="orbital-ring ring-a"></div><div class="orbital-ring ring-b"></div>
         <div class="hero-wave" id="heroWave"></div>
+        <div class="hero-fps">
+          <span>Best full-pipeline throughput</span>
+          <div><strong>117.7</strong><b>E2E FPS</b></div>
+          <small><i></i> 125.7 steady · 124.1 DiT FPS</small>
+        </div>
         <div class="hero-badge badge-a"><span>Denoise</span><b>5-stage</b></div>
         <div class="hero-badge badge-b"><span>Decode</span><b>3-stage VAE</b></div>
       </div>
@@ -68,37 +85,79 @@
 
     <section class="section light" id="idea">
       <div class="section-head reveal">
-        <p class="kicker">01 · The bottleneck</p>
-        <h2>A sequential algorithm leaves parallel hardware waiting.</h2>
-        <p>Rolling Forcing generates a long video chunk by chunk. Each chunk normally walks through every denoising step before the next chunk can advance. More GPUs do not help if they all wait on the same chain.</p>
+        <p class="kicker">01 · The design gap</p>
+        <h2>Streaming exists. The missing piece is a pipeline with live context.</h2>
+        <p>Prior work opens two strong routes: Rolling Forcing keeps a live mixed-noise window but creates layer-wise synchronization, while Live Avatar and HiAR build an efficient stage pipeline by giving up fresh cross-stage history. Wave Forcing keeps the useful half of both designs.</p>
+        <a class="related-work-link" href="https://sjtu-deng-lab.github.io/mbd-lms/" target="_blank" rel="noopener">
+          <span>Earlier algorithm–system co-design</span>
+          <strong>MBD-LMS</strong>
+          <i aria-hidden="true">↗</i>
+        </a>
       </div>
-      <div class="comparison reveal">
-        <article class="compare-card serial-card">
-          <div class="card-label"><span>Conventional</span><b>Serial execution</b></div>
-          <div class="serial-track" aria-hidden="true">
-            <div class="serial-block s1">D₁</div><div class="serial-arrow">→</div>
-            <div class="serial-block s2">D₂</div><div class="serial-arrow">→</div>
-            <div class="serial-block s3">D₃</div><div class="serial-arrow">→</div>
-            <div class="serial-block s4">D₄</div><div class="serial-arrow">→</div>
-            <div class="serial-block vae">VAE</div>
+      <div class="streaming-origin reveal">
+        <div class="origin-copy">
+          <span>Streaming starting point</span>
+          <h3>Few-step causal generation is still block-first.</h3>
+          <p><strong>CausVid · Causal Forcing · Self Forcing / Self-Forcing++</strong> make streaming practical, but every denoising stage of chunk <i>c</i> finishes before chunk <i>c+1</i> starts. That leaves a sequential chain inside each request.</p>
+        </div>
+        <div class="origin-chain" aria-hidden="true">
+          <div class="origin-chunk active"><b>C₀</b><i>D₁</i><i>D₂</i><i>D₃</i><i>D₄</i><em>emit</em></div>
+          <span>then</span>
+          <div class="origin-chunk"><b>C₁</b><i>D₁</i><i>D₂</i><i>D₃</i><i>D₄</i><em>emit</em></div>
+        </div>
+      </div>
+
+      <div class="prior-work-grid reveal">
+        <article class="design-card rf-card">
+          <div class="design-card-head"><span>A · Live frontier</span><b>Rolling Forcing</b></div>
+          <div class="frontier-visual rf-frontier" aria-hidden="true">
+            <i><small>cleaner</small>C₀</i><b>⇄</b><i>C₁</i><b>⇄</b><i><small>noisier</small>C₂</i>
           </div>
-          <p>One chunk completes the full chain before useful work moves forward.</p>
+          <h3>Fresh context, cyclic execution.</h3>
+          <p>RF advances mixed-noise chunks together and emits one clean chunk per joint call after pipeline fill.</p>
+          <dl>
+            <div><dt>Keeps</dt><dd>Live bidirectional active-window context</dd></div>
+            <div><dt>Costs</dt><dd>Reverse edges close a cycle. Even exact Ulysses or Ring execution still coordinates global attention at every Transformer layer</dd></div>
+          </dl>
+          <div class="design-tags"><span>Mixed noise ✓</span><span>Fresh context ✓</span><span class="tag-cost">Layer barriers</span></div>
         </article>
-        <div class="turn-arrow" aria-hidden="true">↘</div>
-        <article class="compare-card wave-card">
-          <div class="card-label"><span>Wave Forcing</span><b>Spatialized time</b></div>
-          <div class="mini-wave" aria-hidden="true">
-            <div class="mw-row"><i></i><i></i><i></i><i></i><i></i></div>
-            <div class="mw-row"><i></i><i></i><i></i><i></i><i></i></div>
-            <div class="mw-row"><i></i><i></i><i></i><i></i><i></i></div>
+
+        <article class="design-card local-card">
+          <div class="design-card-head"><span>B · Stage-local frontier</span><b>Live Avatar · HiAR</b></div>
+          <div class="frontier-visual stage-frontier" aria-hidden="true">
+            <i><small>stage 1</small>C₀</i><b>→</b><i><small>stage 2</small>C₁</i><b>→</b><i><small>stage 3</small>C₂</i>
           </div>
-          <p>Different chunks occupy different denoising stages at the same time.</p>
+          <h3>Clean pipeline, fixed-state history.</h3>
+          <p>Fixed denoising stages pass latents forward in a simple anti-diagonal hardware pipeline.</p>
+          <dl>
+            <div><dt>Gains</dt><dd>Latent-only stage communication without layer-wise global attention</dd></div>
+            <div><dt>Trades</dt><dd>Each stage keeps history at a fixed noise state; its KV cache is not refreshed by cleaner representations from later stages. This is a modeling trade-off to measure, not just a runtime shortcut</dd></div>
+          </dl>
+          <div class="design-tags"><span>Anti-diagonal ✓</span><span>Latent-only ✓</span><span class="tag-cost">Stage-local history</span></div>
+        </article>
+
+        <article class="design-card wave-design-card">
+          <div class="design-card-head"><span>C · Directed live frontier</span><b>Wave Forcing</b></div>
+          <div class="frontier-visual wave-frontier" aria-hidden="true">
+            <i><small>cleaner</small>C₀</i><b>→</b><i>C₁</i><b>→</b><i><small>noisier</small>C₂</i>
+          </div>
+          <h3>Fresh context, acyclic execution.</h3>
+          <p>Wave Forcing keeps RF's mixed-noise schedule: full attention within each chunk, block-causal attention across chunks, and fresh cleaner-to-noisier context.</p>
+          <dl>
+            <div><dt>Changes</dt><dd>Remove only the reverse noisy-to-clean edges; rollout-aligned distillation trains on the same directed frontier used at inference</dd></div>
+            <div><dt>Unlocks</dt><dd>Full-model GPU replicas publish layer-wise KV in one direction, with no global collective barrier</dd></div>
+          </dl>
+          <div class="design-tags"><span>Mixed noise ✓</span><span>Fresh context ✓</span><span>No global barrier ✓</span></div>
         </article>
       </div>
-      <div class="principle-grid reveal">
-        <div><span>1</span><h3>Split the steps</h3><p>Place each denoising step on its own GPU rank, plus one store rank for clean context.</p></div>
-        <div><span>2</span><h3>Move a wavefront</h3><p>Exchange in-flight KV at each layer so multiple chunks advance diagonally together.</p></div>
-        <div><span>3</span><h3>Decode while generating</h3><p>Send finished latents into a time-balanced, multi-stage streaming VAE pipeline.</p></div>
+
+      <div class="cycle-thesis reveal">
+        <div><span>Key observation</span><h3>The mixed-noise window is not the cycle.<br>The reverse <em>noisy → clean</em> edge is.</h3></div>
+        <div class="edge-proof" aria-label="Rolling Forcing has a cyclic edge while Wave Forcing has a directed acyclic edge">
+          <div><span>Full RF</span><p><i>clean</i><b>⇄</b><i>noisy</i></p><small>cycle · synchronize</small></div>
+          <strong>→</strong>
+          <div class="edge-wave"><span>Wave Forcing</span><p><i>clean</i><b>→</b><i>noisy</i></p><small>DAG · pipeline</small></div>
+        </div>
       </div>
     </section>
 
@@ -106,7 +165,7 @@
       <div class="section-head reveal">
         <p class="kicker">02 · Interactive pipeline</p>
         <h2>Two pipelines work at two different scales.</h2>
-        <p>Chunks form a wave across GPUs. Inside every chunk, layer-wise KV communication is prefetched and hidden under the longer computation on the critical rank.</p>
+        <p>Chunk–stage tasks form a wave across full-model GPU replicas. Inside every Transformer layer, one-way KV communication is prefetched and hidden under the longer attention computation of the critical consumer.</p>
       </div>
 
       <div class="overlap-story reveal">
@@ -124,15 +183,15 @@
 
         <div class="causal-explainer">
           <div class="context-stack long-context">
-            <div class="context-title"><span>Critical rank · r0</span><b>8-chunk context</b></div>
+            <div class="context-title"><span>Critical consumer · r0</span><b>8-chunk context</b></div>
             <div class="context-cells"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-            <p>Older chunk, longest attention context → more compute per layer</p>
+            <p>Later, noisier chunk sees every cleaner predecessor → more compute per layer</p>
           </div>
-          <div class="lead-arrow"><span>compute lead creates slack</span><b>→</b></div>
+          <div class="lead-arrow"><span>shorter ranks publish first</span><b>←</b></div>
           <div class="context-stack short-context">
-            <div class="context-title"><span>Later ranks · r1–store</span><b>≈5-chunk context</b></div>
+            <div class="context-title"><span>Cleaner producers · r1–store</span><b>≈5-chunk context</b></div>
             <div class="context-cells"><i></i><i></i><i></i><i></i><i></i></div>
-            <p>Shorter context → KV becomes ready before r0 needs it</p>
+            <p>Earlier chunks have shorter legal context → fresh KV is ready before r0 needs it</p>
           </div>
         </div>
 
@@ -191,7 +250,7 @@
       <div class="pipeline-intro reveal">
         <p class="micro-kicker">Across consecutive video chunks</p>
         <h3>Now zoom out: the whole wavefront.</h3>
-        <p>The layer-level overlap above happens repeatedly inside every active diffusion rank below.</p>
+        <p>Read the schedule by GPU ID vertically and Stage ID horizontally. Follow one color diagonally to track the same chunk through diffusion, context publication, and VAE decode.</p>
       </div>
 
       <div class="pipeline-shell reveal">
@@ -209,11 +268,17 @@
           </div>
         </div>
 
-        <div class="pipeline-stage">
-          <div class="stage-title"><span class="stage-dot diffusion-dot"></span><b>Layer 1 · Wavefront compute</b><small>5 ranks · causal DiT</small></div>
-          <div class="rank-grid" id="diffusionGrid"></div>
+        <div class="pipeline-stage matrix-stage">
+          <div class="matrix-stage-head">
+            <div class="stage-title"><span class="stage-dot diffusion-dot"></span><b>GPU × Stage wavefront</b><small>same color · same chunk</small></div>
+            <div class="matrix-key" aria-hidden="true"><span class="active-key"><i></i>active chunk</span><span class="kv-key"><i></i>KV arrived</span><span class="owner-key"><i></i>fixed GPU ownership</span><b>movement ↘</b></div>
+          </div>
+          <div class="matrix-scroll">
+            <div class="wavefront-matrix" id="wavefrontMatrix" aria-label="Pipeline matrix with GPU ID on the vertical axis and Stage ID on the horizontal axis"></div>
+          </div>
+          <div class="matrix-guide"><span><b>↘</b> Step +1 moves each chunk to the next GPU–stage pair</span><span><b>△</b> Light upper triangle = cleaner-stage KV has arrived at each noisier DiT consumer</span></div>
           <div class="transport-layer">
-            <div class="stage-title transport-title"><span class="stage-dot transport-dot"></span><b>Layer 2 · KV transport fabric</b><small>copy engine · one-sided direct write</small></div>
+            <div class="stage-title transport-title"><span class="stage-dot transport-dot"></span><b>Layer-wise KV transport inside the diffusion wave</b><small>copy engine · one-sided direct write</small></div>
             <div class="transport-fabric" id="transportFabric" aria-label="KV packets moving between diffusion ranks">
               <span class="fabric-label from-label">producer KV</span>
               <div class="fabric-line"><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -222,24 +287,21 @@
               <span class="fabric-label to-label">consumer slots</span>
             </div>
           </div>
-          <div class="bridge" aria-hidden="true"><span>completed latent chunks leave the diffusion fabric</span><i></i></div>
-          <div class="stage-title vae-title"><span class="stage-dot vae-dot"></span><b>Layer 3 · Streaming VAE decode</b><small>3 ranks · time-balanced split</small></div>
-          <div class="rank-grid vae-grid" id="vaeGrid"></div>
         </div>
 
         <div class="pipeline-readout" aria-live="polite">
           <div><span>Now</span><strong id="phaseTitle">Filling the pipeline</strong></div>
-          <p id="phaseDescription">The first noisy chunk enters denoise rank D₁. Later chunks will follow one tick apart.</p>
+          <p id="phaseDescription">The first noisy chunk enters GPU 0 / D₁. Later chunks follow one tick apart and move diagonally across the matrix.</p>
           <div class="readout-stats">
             <span><i id="activeCount">1</i> active ranks</span>
             <span><i id="outputCount">0</i> chunks decoded</span>
-            <span><i>≈115 ms</i> per steady tick</span>
+            <span><i>≈95 ms</i> best 1.3B steady tick</span>
           </div>
         </div>
       </div>
 
       <div class="detail-grid reveal">
-        <article><div class="detail-icon">KV</div><h3>Layer-wise context exchange</h3><p>At every transformer layer, ranks all-gather in-flight KV while the store rank contributes clean KV in real time.</p></article>
+        <article><div class="detail-icon">KV</div><h3>Layer-wise context exchange</h3><p>At every Transformer layer, cleaner ranks publish fresh KV in one direction. The longer-context consumer gates only when those states are used.</p></article>
         <article><div class="detail-icon">↝</div><h3>Deterministic re-noise</h3><p>A deterministic seed per chunk and stage preserves reproducibility while chunks travel through independent ranks.</p></article>
         <article><div class="detail-icon">≋</div><h3>Two disjoint NCCL worlds</h3><p>Diffusion and VAE use separate communicators, connected by a CPU queue, avoiding cross-pipeline deadlocks.</p></article>
         <article><div class="detail-icon">Δt</div><h3>Measured-time VAE split</h3><p>Stages are partitioned by observed runtime instead of FLOPs, balancing memory-bound high-resolution decoder blocks.</p></article>
@@ -250,7 +312,7 @@
       <div class="section-head reveal">
         <p class="kicker">03 · End-to-end KV transport</p>
         <h2>Optimize bytes, movement, and destination.</h2>
-        <p>Communication is not one cost. Wave Forcing attacks three different taxes: how many bytes move, who coordinates the move, and whether the consumer must rebuild the buffer afterward.</p>
+        <p>Communication is not one cost. Wave Parallelism attacks three different taxes: how many bytes move, who coordinates the move, and whether the consumer must rebuild the buffer afterward.</p>
       </div>
 
       <div class="transport-explorer reveal">
@@ -299,7 +361,7 @@
         <article class="recommended"><span>03 · Layout</span><h3>Paged writes remove the assembly wall.</h3><div class="slot-path"><i></i><i></i><i></i><i></i><i></i><i></i></div><p>Each producer writes directly into its fixed slot in the consumer's contiguous attention buffer. Attention reads the prefix in place—no per-layer reconstruction.</p><small>torch.cat: 18.49 → 4.08 ms · recommended</small></article>
       </div>
 
-      <div class="compatibility-note reveal"><b>Why this is not one linear stack</b><p>FP8 KV is a byte-reduction experiment; current paged transport is BF16 and does not yet support FP8 one-sided slots. The best measured route is <strong>SageAttention + BF16 paged direct-write</strong>: 431.9 ms/tick on the 14B setup.</p></div>
+      <div class="compatibility-note reveal"><b>Why this is not one linear stack</b><p>FP8 KV is a byte-reduction experiment; it is distinct from the sweep's W8A8 DiT tier. In the final pooled-p50 report, the best 14B route is <strong>Sage + W8A8 + causal paged</strong> at <strong>421.1 ms p50 / 28.1 E2E FPS</strong>. The 14B run uses shape-accurate random-init dummy weights.</p></div>
     </section>
 
     <section class="section vae-section" id="vae">
@@ -326,7 +388,7 @@
         </article>
 
         <article class="contention-card right-pipeline">
-          <div class="contention-head"><div><span>B · Wave Forcing</span><h3>One chunk per GPU stage</h3></div><b>No same-GPU overlap</b></div>
+          <div class="contention-head"><div><span>B · Wave Parallelism</span><h3>One chunk per GPU stage</h3></div><b>No same-GPU overlap</b></div>
           <div class="vae-wave-grid" id="vaeWaveGrid">
             <div class="vwg-corner"></div><div class="vwg-tick">Tick T</div><div class="vwg-tick">T+1</div><div class="vwg-tick">T+2</div><div class="vwg-tick">T+3</div>
             <div class="vwg-rank">GPU 5 · early</div><i data-vae-phase="0" style="--vc:#20d7d0">C1</i><i data-vae-phase="1" style="--vc:#8b7cff">C2</i><i data-vae-phase="2" style="--vc:#c8ff58">C3</i><i data-vae-phase="3" style="--vc:#ff9a5b">C4</i>
@@ -365,11 +427,11 @@
         </div>
       </div>
 
-      <div class="barrier-proof reveal">
-        <div class="proof-label"><span>End-to-end steady tick</span><h3>The VAE finishes before the next latent arrives.</h3></div>
+      <div class="barrier-proof latest-cadence reveal">
+        <div class="proof-label"><span>After extreme 1.3B optimization</span><h3>The balanced VAE becomes the final cadence—not an idle bubble.</h3></div>
         <div class="proof-timeline">
-          <div class="proof-track diffusion-proof"><label>Diffusion cadence</label><i><b>≈115 ms / tick</b></i></div>
-          <div class="proof-track vae-proof"><label>Balanced VAE</label><i><b>≈99 ms / chunk</b></i><span>≈16 ms headroom · no bubble</span></div>
+          <div class="proof-track diffusion-proof"><label>Best E2E config · DiT</label><i><b>95.4 ms p50 / tick</b></i></div>
+          <div class="proof-track vae-proof"><label>Balanced VAE</label><i><b>≈99 ms / chunk</b></i><span>≈3.5 ms final barrier · all stages remain occupied</span></div>
           <div class="arrival-mark mark-start"><i></i><span>chunk arrives</span></div>
           <div class="arrival-mark mark-next"><i></i><span>next chunk</span></div>
         </div>
@@ -378,35 +440,53 @@
 
     <section class="section results" id="results">
       <div class="section-head reveal">
-        <p class="kicker">05 · Throughput</p>
-        <h2>Pipeline depth becomes throughput.</h2>
-        <p>Once filled, latency no longer scales with the number of denoising steps in the usual way: every tick retires another chunk.</p>
+        <p class="kicker">05 · New benchmark sweep</p>
+        <h2>A full matrix,<br>not a single lucky run.</h2>
+        <p>178 recorded runs across two model scales, two pipeline topologies, three compute tiers, and six KV exchange modes. The 54 non-relay configurations are complete. Steady ticks use <code>per_tick_ms[12:-4]</code>, pooled across three repeats before taking p50.</p>
       </div>
-      <div class="result-layout reveal">
-        <div class="result-hero">
-          <span>60-second video · 957 pixel frames</span>
-          <strong><i class="count-up" data-target="99.8">0</i><small> FPS</small></strong>
-          <p>9.62 seconds end-to-end on 8× H200, using SageAttention and a time-balanced VAE split.</p>
-        </div>
-        <div class="bar-chart" aria-label="Frames per second comparison">
-          <div class="chart-row"><div class="chart-label"><span>Single GPU baseline</span><b>13.6 FPS</b></div><div class="bar-track"><i style="--width:13.6%"></i></div></div>
-          <div class="chart-row"><div class="chart-label"><span>Wave parallel</span><b>60 FPS</b></div><div class="bar-track"><i style="--width:60%"></i></div></div>
-          <div class="chart-row featured"><div class="chart-label"><span>+ SageAttention + balanced VAE</span><b>99.8 FPS</b></div><div class="bar-track"><i style="--width:99.8%"></i></div></div>
-        </div>
+      <div class="benchmark-highlights reveal">
+        <article class="highlight-fps"><span>Best full pipeline</span><strong>117.7 E2E FPS</strong><small>Sage · causal paged · 7.9× single-GPU</small></article>
+        <article class="highlight-best"><span>399-latent E2E time</span><strong>≈13.56 s</strong><small>1596 output frames · includes streaming VAE</small></article>
+        <article><span>Fastest valid steady tick</span><strong>126.5 FPS(p50)</strong><small>94.9 ms · 4+3 · Sage + W8A8 · causal paged</small></article>
+        <article><span>Best 14B pipeline</span><strong>28.1 E2E FPS</strong><small>421.1 ms p50 · Sage + W8A8 · causal paged</small></article>
       </div>
-      <div class="caveat reveal"><span>Quality note</span><p>The architecture is exact with the time-balanced VAE split. SageAttention is near-lossless per step; practical long-video quality is primarily bounded by the current Wan2.1 1.3B rolling-forcing checkpoint.</p></div>
+
+      <div class="benchmark-panel reveal">
+        <div class="benchmark-toolbar">
+          <div class="benchmark-tabs" role="tablist" aria-label="Benchmark configuration">
+            <button class="active" data-benchmark="1.3b-4+3" role="tab">1.3B · 4+3</button>
+            <button data-benchmark="1.3b-5+2" role="tab">1.3B · 5+2</button>
+            <button data-benchmark="14b-4+3" role="tab">14B · 4+3</button>
+          </div>
+          <div class="benchmark-legend"><i></i> Each cell: steady p50 · DiT FPS · E2E FPS <b>orange = VAE contention</b></div>
+        </div>
+        <div class="benchmark-meta">
+          <div><span>Model / topology</span><strong id="benchmarkTitle">1.3B · 4+3</strong></div>
+          <div><span>KV semantics</span><strong>Causal</strong></div>
+          <div><span>Aggregation</span><strong>Pooled p50 · 3 reps</strong></div>
+          <div><span>Single-GPU baseline</span><strong id="benchmarkBaseline">106.462 s</strong></div>
+        </div>
+        <div class="benchmark-table-wrap">
+          <table class="benchmark-table">
+            <thead><tr><th>Compute tier</th><th>Sync</th><th>Overlap</th><th>One-sided</th><th>Staggered</th><th>Paged</th></tr></thead>
+            <tbody id="benchmarkBody"><tr><td colspan="6">Loading benchmark summary…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="benchmark-foot"><span id="benchmarkFoot">Steady FPS(p50) uses 12 output frames per tick. DiT/E2E FPS use 1596 frames over their respective wall clocks.</span><b>Relay excluded: 14 recorded timeouts · rerun pending</b></div>
+      </div>
+      <div class="caveat reveal"><span>Source & scope</span><p>Final 178-record report: 164 successful runs and 14 recorded relay timeouts. <strong>FPS(p50)</strong> is steady tick throughput; <strong>DiT FPS</strong> includes diffusion fill/drain; <strong>E2E FPS</strong> also includes VAE. The 14B sweep uses random-init dummy weights. In 5+2, the two-stage VAE sets a structural ceiling near 85 E2E FPS; orange Sage/SageFP8 async cells show an additional resource-contention slowdown despite healthy DiT throughput.</p></div>
     </section>
 
     <section class="closing">
       <div class="closing-wave" aria-hidden="true"></div>
-      <p class="kicker">The core idea</p>
-      <h2>Do not make one GPU run faster.<br><em>Make time run in parallel.</em></h2>
+      <p class="kicker">Wave Forcing × Wave Parallel</p>
+      <h2>Wave Your Streaming Video<br><em>to Speed-of-Light.</em></h2>
       <div class="closing-links"><a class="button primary" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">Explore the code ↗</a><span>Paper & models coming soon</span></div>
     </section>
   </main>
 
   <footer>
-    <div class="footer-brand"><span class="brand-mark"><i></i><i></i><i></i></span><b>Wave Forcing</b></div>
+    <div class="footer-brand"><img class="brand-mark" src="static/images/wave-forcing-logo.svg" alt=""><b>Wave Forcing × Wave Parallel</b></div>
     <p>MLSys Team · DENG Lab · Shanghai Jiao Tong University</p>
     <a href="https://SJTU-DENG-Lab.github.io/" target="_blank" rel="noopener">DENG Lab ↗</a>
   </footer>

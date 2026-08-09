@@ -12,79 +12,107 @@
   const timeline = $('#timeline');
   const playButton = $('#playButton');
   const stepButton = $('#stepButton');
-  const diffusionGrid = $('#diffusionGrid');
-  const vaeGrid = $('#vaeGrid');
+  const wavefrontMatrix = $('#wavefrontMatrix');
+  const pipelineStages = [
+    { id: 'D₁', role: 'denoise 1', group: 'diffusion' },
+    { id: 'D₂', role: 'denoise 2', group: 'diffusion' },
+    { id: 'D₃', role: 'denoise 3', group: 'diffusion' },
+    { id: 'D₄', role: 'denoise 4', group: 'diffusion' },
+    { id: 'KV', role: 'clean store', group: 'store' },
+    { id: 'V₁', role: 'VAE early', group: 'vae' },
+    { id: 'V₂', role: 'VAE middle', group: 'vae' },
+    { id: 'V₃', role: 'VAE output', group: 'vae' }
+  ];
 
-  function makeRank(label, role, index, type) {
-    const rank = document.createElement('div');
-    rank.className = 'rank';
-    rank.dataset.index = index;
-    rank.dataset.type = type;
-    rank.innerHTML = `<div class="rank-head"><b>${label}</b><span>${role}</span></div><div class="rank-slot"><span class="idle">idle</span></div>`;
-    return rank;
+  function buildWavefrontMatrix() {
+    const cells = [
+      '<div class="matrix-corner"><b>Stage ID →</b><span>GPU ID ↓</span></div>',
+      '<div class="matrix-group diffusion-group">Wave diffusion · full-model replicas</div>',
+      '<div class="matrix-group vae-group">Streaming VAE · time-balanced</div>'
+    ];
+
+    pipelineStages.forEach((stage, stageIndex) => {
+      const boundary = stageIndex === 5 ? ' vae-boundary' : '';
+      cells.push(`<div class="matrix-stage-label ${stage.group}${boundary}" style="grid-column:${stageIndex + 2};grid-row:2"><b>${stage.id}</b><span>${stage.role}</span></div>`);
+    });
+
+    pipelineStages.forEach((ownedStage, gpuIndex) => {
+      const row = gpuIndex + 3;
+      const rowBoundary = gpuIndex === 5 ? ' vae-row-boundary' : '';
+      cells.push(`<div class="matrix-gpu-label ${ownedStage.group}${rowBoundary}" style="grid-column:1;grid-row:${row}"><b>GPU ${gpuIndex}</b><span>replica ${gpuIndex}</span></div>`);
+      pipelineStages.forEach((stage, stageIndex) => {
+        const mapped = gpuIndex === stageIndex;
+        const kvReturn = gpuIndex < stageIndex && stageIndex <= 4;
+        const divider = stageIndex === 5 ? ' vae-boundary' : '';
+        const cellType = mapped ? `mapped ${stage.group}` : (kvReturn ? 'kv-return-cell' : 'unmapped');
+        const classes = `matrix-cell ${cellType}${divider}${rowBoundary}`;
+        const label = mapped
+          ? `<span class="matrix-coordinate">GPU ${gpuIndex} · ${stage.id}</span><span class="matrix-idle">idle</span>`
+          : (kvReturn ? '<span class="kv-pending">KV</span>' : '');
+        const accessibility = mapped
+          ? `aria-label="GPU ${gpuIndex}, stage ${stage.role}"`
+          : (kvReturn ? `aria-label="GPU ${gpuIndex} receives KV from ${stage.role}"` : 'aria-hidden="true"');
+        cells.push(`<div class="${classes}" data-stage="${stageIndex}" data-source-stage="${kvReturn ? stageIndex : ''}" style="grid-column:${stageIndex + 2};grid-row:${row}" ${accessibility}>${label}</div>`);
+      });
+    });
+
+    wavefrontMatrix.innerHTML = cells.join('');
   }
 
-  ['GPU 0|Denoise D₁', 'GPU 1|Denoise D₂', 'GPU 2|Denoise D₃', 'GPU 3|Denoise D₄', 'GPU 4|Clean KV store']
-    .forEach((item, index) => {
-      const [label, role] = item.split('|');
-      diffusionGrid.appendChild(makeRank(label, role, index, 'diffusion'));
-    });
-
-  ['GPU 5|VAE early', 'GPU 6|VAE middle', 'GPU 7|VAE output']
-    .forEach((item, index) => {
-      const [label, role] = item.split('|');
-      vaeGrid.appendChild(makeRank(label, role, index, 'vae'));
-    });
+  buildWavefrontMatrix();
 
   function chunkHTML(chunkIndex, labelPrefix = 'C') {
     const color = colors[chunkIndex % colors.length];
-    return `<span class="chunk" style="--chunk:${color}">${labelPrefix}${chunkIndex + 1}</span>`;
+    return `<span class="matrix-chunk" style="--chunk:${color}"><b>${labelPrefix}${chunkIndex + 1}</b></span>`;
   }
 
   function phaseFor(currentTick) {
     if (currentTick < 4) return {
       title: 'Filling the wavefront',
-      description: `Chunk C${currentTick + 1} enters D₁ while earlier chunks move to later denoising ranks. Idle GPUs disappear one tick at a time.`
+      description: `Chunk C${currentTick + 1} enters GPU 0 / D₁ while earlier colors advance diagonally. Pale cells fan up-left as each cleaner stage publishes its KV.`
     };
     if (currentTick < 7) return {
       title: 'Diffusion at full occupancy',
-      description: 'All diffusion ranks are active. The store rank receives a completed latent chunk and immediately streams it toward the VAE.'
+      description: 'GPU 0–4 are active across D₁–D₄ and the clean-KV stage. A completed latent now crosses the vertical boundary toward V₁.'
     };
     if (currentTick < 9) return {
       title: 'Overlapping generation and decode',
-      description: 'New latent chunks continue through diffusion while earlier chunks are decoded by the independent three-stage VAE pipeline.'
+      description: 'New colors continue across diffusion while earlier colors advance through the independent V₁–V₃ decode stages.'
     };
     return {
       title: 'Steady state: one chunk per tick',
-      description: 'The complete eight-GPU pipeline is occupied. Every tick advances all in-flight chunks and retires one decoded video chunk.'
+      description: 'The active diagonal spans all eight GPU–stage pairs; the light upper triangle confirms that every required cleaner-stage KV has arrived.'
     };
   }
 
   function render() {
     let active = 0;
-    diffusionGrid.querySelectorAll('.rank').forEach((rank, rankIndex) => {
-      const chunkIndex = tick - rankIndex;
-      const slot = rank.querySelector('.rank-slot');
+    wavefrontMatrix.querySelectorAll('.matrix-cell.mapped').forEach((cell, stageIndex) => {
+      const chunkIndex = tick - stageIndex;
+      const stage = pipelineStages[stageIndex];
+      const coordinate = `<span class="matrix-coordinate">GPU ${stageIndex} · ${stage.id}</span>`;
       if (chunkIndex >= 0) {
-        rank.classList.add('active');
-        slot.innerHTML = chunkHTML(chunkIndex);
+        cell.classList.add('active');
+        cell.innerHTML = coordinate + chunkHTML(chunkIndex);
         active += 1;
       } else {
-        rank.classList.remove('active');
-        slot.innerHTML = '<span class="idle">idle</span>';
+        cell.classList.remove('active');
+        cell.innerHTML = `${coordinate}<span class="matrix-idle">${stage.group === 'vae' ? 'waiting' : 'idle'}</span>`;
       }
     });
 
-    vaeGrid.querySelectorAll('.rank').forEach((rank, rankIndex) => {
-      const chunkIndex = tick - 5 - rankIndex;
-      const slot = rank.querySelector('.rank-slot');
+    wavefrontMatrix.querySelectorAll('.matrix-cell.kv-return-cell').forEach(cell => {
+      const sourceStage = Number(cell.dataset.sourceStage);
+      const chunkIndex = tick - sourceStage;
       if (chunkIndex >= 0) {
-        rank.classList.add('active');
-        slot.innerHTML = chunkHTML(chunkIndex);
-        active += 1;
+        const color = colors[chunkIndex % colors.length];
+        cell.style.setProperty('--kv', color);
+        cell.classList.add('kv-ready');
+        cell.innerHTML = `<span class="kv-arrived" style="--kv:${color}"><i></i><b>KV</b><span>C${chunkIndex + 1}</span></span>`;
       } else {
-        rank.classList.remove('active');
-        slot.innerHTML = '<span class="idle">waiting</span>';
+        cell.style.removeProperty('--kv');
+        cell.classList.remove('kv-ready');
+        cell.innerHTML = '<span class="kv-pending">KV</span>';
       }
     });
 
@@ -317,6 +345,73 @@
     renderVaePhase();
   }, 900);
   window.addEventListener('resize', renderVaePhase);
+
+  const benchmarkTierLabels = {
+    bf16: { name: 'BF16', detail: 'Base precision' },
+    sage: { name: 'Sage', detail: 'SageAttention' },
+    sagefp8: { name: 'Sage + W8A8', detail: 'Compute quantization' }
+  };
+  const benchmarkModes = ['sync', 'overlap', 'onesided', 'staggered', 'paged'];
+  const benchmarkButtons = [...document.querySelectorAll('[data-benchmark]')];
+  const benchmarkBody = $('#benchmarkBody');
+  let benchmarkData;
+
+  function benchmarkCell(cell, isE2eBest, isSteadyBest) {
+    if (!cell) return '<span class="benchmark-empty" aria-label="Not measured">—</span>';
+    const classes = ['benchmark-cell'];
+    if (isE2eBest) classes.push('best');
+    if (isSteadyBest) classes.push('steady-best');
+    if (cell.anomaly) classes.push('anomaly');
+    const speedup = Number.isFinite(cell.speedup) ? ` · ${cell.speedup.toFixed(1)}×` : '';
+    const warning = cell.anomaly ? `<b class="benchmark-anomaly">${cell.anomaly}</b>` : '';
+    return `<div class="${classes.join(' ')}"><strong>${cell.p50.toFixed(1)}</strong><small><em>${cell.fpsP50.toFixed(1)} FPS(p50)</em>${speedup}</small><small class="wall-fps">DiT ${cell.ditFps.toFixed(1)} · E2E ${cell.e2eFps.toFixed(1)}</small>${warning}</div>`;
+  }
+
+  function renderBenchmark(key) {
+    if (!benchmarkData || !benchmarkData.benchmarks[key]) return;
+    const data = benchmarkData.benchmarks[key];
+    const available = Object.values(data.rows).flatMap(row => benchmarkModes.map(mode => row[mode]).filter(Boolean));
+    const bestP50 = Math.min(...available.map(cell => cell.p50));
+    const bestE2e = Math.max(...available.map(cell => cell.e2eFps));
+
+    $('#benchmarkTitle').textContent = `${data.scale} · ${data.topology}`;
+    $('#benchmarkBaseline').textContent = Number.isFinite(data.baseline) ? `${data.baseline.toFixed(3)} s · ${data.baselineFps.toFixed(1)} FPS` : 'Not recorded · dummy';
+    const scope = Number.isFinite(data.baseline)
+      ? `Pooled ${benchmarkData.statistics.steadyWindow} · ${benchmarkData.statistics.framesPerTick} frames/tick. DiT and E2E use ${benchmarkData.statistics.outputFrames} output frames; × uses the ${data.baseline.toFixed(3)} s baseline.`
+      : `Pooled ${benchmarkData.statistics.steadyWindow} · shape-accurate ${data.weights}; DiT/E2E use ${benchmarkData.statistics.outputFrames} output frames. No 14B single-GPU baseline.`;
+    $('#benchmarkFoot').textContent = `${scope} ${data.note || ''}`.trim();
+
+    benchmarkBody.innerHTML = Object.entries(benchmarkTierLabels).map(([tier, label]) => {
+      const row = data.rows[tier] || {};
+      const cells = benchmarkModes.map(mode => {
+        const cell = row[mode];
+        return `<td>${benchmarkCell(cell, cell && cell.e2eFps === bestE2e, cell && cell.p50 === bestP50)}</td>`;
+      }).join('');
+      return `<tr><td><div class="benchmark-tier ${tier}"><i></i><div><span>${label.name}</span><b>${label.detail}</b></div></div></td>${cells}</tr>`;
+    }).join('');
+
+    benchmarkButtons.forEach(button => {
+      const active = button.dataset.benchmark === key;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.tabIndex = active ? 0 : -1;
+    });
+  }
+
+  benchmarkButtons.forEach(button => button.addEventListener('click', () => renderBenchmark(button.dataset.benchmark)));
+  fetch('static/data/results_summary.json')
+    .then(response => {
+      if (!response.ok) throw new Error(`Benchmark data returned ${response.status}`);
+      return response.json();
+    })
+    .then(data => {
+      benchmarkData = data;
+      renderBenchmark('1.3b-4+3');
+    })
+    .catch(error => {
+      benchmarkBody.innerHTML = '<tr><td colspan="6" class="benchmark-load-error">Benchmark summary could not be loaded.</td></tr>';
+      console.error(error);
+    });
 
   const heroWave = $('#heroWave');
   for (let index = 0; index < 15; index += 1) {

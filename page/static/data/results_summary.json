@@ -1,0 +1,125 @@
+{
+  "source": "results/results_table.json",
+  "report": "KV exchange full-matrix report · 2026-08-09",
+  "records": 178,
+  "ok": 164,
+  "timeouts": 14,
+  "statistics": {
+    "steadyWindow": "per_tick_ms[12:-4]",
+    "aggregation": "pooled p50 across 3 repeats",
+    "latentFrames": 399,
+    "outputFrames": 1596,
+    "framesPerTick": 12
+  },
+  "headline": {
+    "bestE2eFps": 117.7,
+    "bestE2eSeconds": 13.56,
+    "bestE2eSpeedup": 7.9,
+    "bestE2eConfig": "4+3 · 1.3B · Sage · causal · paged",
+    "maxSteadyFps": 126.5,
+    "maxSteadyP50Ms": 94.9,
+    "maxSteadyConfig": "4+3 · 1.3B · Sage + W8A8 · causal · paged",
+    "best14bE2eFps": 28.1,
+    "best14bP50Ms": 421.1,
+    "best14bConfig": "4+3 · 14B · Sage + W8A8 · causal · paged",
+    "best52ReliableE2eFps": 85.1,
+    "best52ReliableConfig": "5+2 · 1.3B · Sage · causal · sync",
+    "rawMaxSteadyFps": 127.1,
+    "rawMaxSteadyConfig": "5+2 · 1.3B · Sage + W8A8 · causal · paged · VAE anomaly"
+  },
+  "benchmarks": {
+    "1.3b-4+3": {
+      "scale": "1.3B",
+      "topology": "4+3",
+      "weights": "longvideo.pt",
+      "baseline": 106.462,
+      "baselineFps": 15.0,
+      "note": "Best production E2E: Sage · causal · paged at 117.7 FPS.",
+      "rows": {
+        "bf16": {
+          "sync": {"p50": 153.4, "fpsP50": 78.3, "ditFps": 77.3, "e2eFps": 76.7, "speedup": 5.1},
+          "overlap": {"p50": 142.1, "fpsP50": 84.5, "ditFps": 83.8, "e2eFps": 83.1, "speedup": 5.5},
+          "onesided": {"p50": 140.2, "fpsP50": 85.6, "ditFps": 84.6, "e2eFps": 84.0, "speedup": 5.6},
+          "staggered": {"p50": 140.2, "fpsP50": 85.6, "ditFps": 84.8, "e2eFps": 84.2, "speedup": 5.6},
+          "paged": {"p50": 139.1, "fpsP50": 86.3, "ditFps": 85.6, "e2eFps": 84.9, "speedup": 5.7}
+        },
+        "sage": {
+          "sync": {"p50": 110.5, "fpsP50": 108.6, "ditFps": 106.4, "e2eFps": 105.4, "speedup": 7.0},
+          "overlap": {"p50": 99.5, "fpsP50": 120.5, "ditFps": 118.8, "e2eFps": 117.5, "speedup": 7.8},
+          "onesided": {"p50": 96.4, "fpsP50": 124.4, "ditFps": 116.5, "e2eFps": 112.8, "speedup": 7.6},
+          "staggered": {"p50": 96.2, "fpsP50": 124.7, "ditFps": 122.2, "e2eFps": 117.4, "speedup": 7.8},
+          "paged": {"p50": 95.4, "fpsP50": 125.7, "ditFps": 124.1, "e2eFps": 117.7, "speedup": 7.9}
+        },
+        "sagefp8": {
+          "sync": {"p50": 112.0, "fpsP50": 107.1, "ditFps": 103.9, "e2eFps": 102.9, "speedup": 6.9},
+          "overlap": {"p50": 99.6, "fpsP50": 120.5, "ditFps": 116.7, "e2eFps": 115.5, "speedup": 7.7},
+          "onesided": {"p50": 95.8, "fpsP50": 125.3, "ditFps": 121.1, "e2eFps": 115.1, "speedup": 7.7},
+          "staggered": {"p50": 95.7, "fpsP50": 125.4, "ditFps": 121.2, "e2eFps": 116.5, "speedup": 7.8},
+          "paged": {"p50": 94.9, "fpsP50": 126.5, "ditFps": 121.5, "e2eFps": 115.9, "speedup": 7.7}
+        }
+      }
+    },
+    "1.3b-5+2": {
+      "scale": "1.3B",
+      "topology": "5+2",
+      "weights": "longvideo.pt",
+      "baseline": 134.432,
+      "baselineFps": 11.9,
+      "note": "Two-stage VAE caps reliable E2E at ≈85 FPS; orange cells show additional async contention.",
+      "rows": {
+        "bf16": {
+          "sync": {"p50": 155.7, "fpsP50": 77.1, "ditFps": 75.6, "e2eFps": 74.9, "speedup": 6.3},
+          "overlap": {"p50": 142.9, "fpsP50": 84.0, "ditFps": 82.7, "e2eFps": 82.0, "speedup": 6.9},
+          "onesided": {"p50": 140.6, "fpsP50": 85.4, "ditFps": 83.9, "e2eFps": 83.1, "speedup": 7.0},
+          "staggered": {"p50": 140.2, "fpsP50": 85.6, "ditFps": 84.1, "e2eFps": 83.3, "speedup": 7.0},
+          "paged": {"p50": 138.7, "fpsP50": 86.5, "ditFps": 84.9, "e2eFps": 84.2, "speedup": 7.1}
+        },
+        "sage": {
+          "sync": {"p50": 112.9, "fpsP50": 106.3, "ditFps": 103.7, "e2eFps": 85.1, "speedup": 7.2},
+          "overlap": {"p50": 100.5, "fpsP50": 119.4, "ditFps": 117.0, "e2eFps": 59.2, "speedup": 5.0, "anomaly": "VAE contention"},
+          "onesided": {"p50": 96.5, "fpsP50": 124.3, "ditFps": 121.5, "e2eFps": 53.3, "speedup": 4.5, "anomaly": "VAE contention"},
+          "staggered": {"p50": 96.4, "fpsP50": 124.5, "ditFps": 121.5, "e2eFps": 55.2, "speedup": 4.6, "anomaly": "VAE contention"},
+          "paged": {"p50": 94.9, "fpsP50": 126.5, "ditFps": 123.6, "e2eFps": 55.2, "speedup": 4.7, "anomaly": "VAE contention"}
+        },
+        "sagefp8": {
+          "sync": {"p50": 114.6, "fpsP50": 104.7, "ditFps": 101.5, "e2eFps": 84.7, "speedup": 7.1},
+          "overlap": {"p50": 100.5, "fpsP50": 119.4, "ditFps": 115.6, "e2eFps": 84.9, "speedup": 7.1},
+          "onesided": {"p50": 96.1, "fpsP50": 124.9, "ditFps": 119.5, "e2eFps": 60.6, "speedup": 5.4, "anomaly": "VAE contention"},
+          "staggered": {"p50": 95.8, "fpsP50": 125.3, "ditFps": 120.7, "e2eFps": 53.1, "speedup": 4.5, "anomaly": "VAE contention"},
+          "paged": {"p50": 94.4, "fpsP50": 127.1, "ditFps": 122.1, "e2eFps": 54.2, "speedup": 4.6, "anomaly": "VAE contention"}
+        }
+      }
+    },
+    "14b-4+3": {
+      "scale": "14B",
+      "topology": "4+3",
+      "weights": "random-init dummy",
+      "baseline": null,
+      "baselineFps": null,
+      "note": "Shape-accurate dummy weights; Sage + W8A8 · causal · paged reaches 28.1 E2E FPS.",
+      "rows": {
+        "bf16": {
+          "sync": {"p50": 701.6, "fpsP50": 17.1, "ditFps": 16.9, "e2eFps": 16.9},
+          "overlap": {"p50": 666.5, "fpsP50": 18.0, "ditFps": 17.8, "e2eFps": 17.8},
+          "onesided": {"p50": 657.2, "fpsP50": 18.3, "ditFps": 18.1, "e2eFps": 18.0},
+          "staggered": {"p50": 657.7, "fpsP50": 18.2, "ditFps": 18.1, "e2eFps": 18.0},
+          "paged": {"p50": 649.8, "fpsP50": 18.5, "ditFps": 18.3, "e2eFps": 18.2}
+        },
+        "sage": {
+          "sync": {"p50": 531.7, "fpsP50": 22.6, "ditFps": 22.2, "e2eFps": 22.2},
+          "overlap": {"p50": 501.6, "fpsP50": 23.9, "ditFps": 23.6, "e2eFps": 23.6},
+          "onesided": {"p50": 488.1, "fpsP50": 24.6, "ditFps": 24.1, "e2eFps": 24.0},
+          "staggered": {"p50": 487.8, "fpsP50": 24.6, "ditFps": 24.3, "e2eFps": 24.2},
+          "paged": {"p50": 480.2, "fpsP50": 25.0, "ditFps": 24.7, "e2eFps": 24.6}
+        },
+        "sagefp8": {
+          "sync": {"p50": 474.3, "fpsP50": 25.3, "ditFps": 25.0, "e2eFps": 24.9},
+          "overlap": {"p50": 440.2, "fpsP50": 27.3, "ditFps": 26.9, "e2eFps": 26.9},
+          "onesided": {"p50": 429.1, "fpsP50": 28.0, "ditFps": 27.3, "e2eFps": 27.3},
+          "staggered": {"p50": 428.9, "fpsP50": 28.0, "ditFps": 27.6, "e2eFps": 27.6},
+          "paged": {"p50": 421.1, "fpsP50": 28.5, "ditFps": 28.1, "e2eFps": 28.1}
+        }
+      }
+    }
+  }
+}
