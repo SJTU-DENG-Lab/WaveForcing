@@ -3,369 +3,413 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  
-  <!-- Primary Meta Tags -->
-  <!-- TODO: Replace with your paper title and author names -->
-  <meta name="title" content="PAPER_TITLE - AUTHOR_NAMES">
-  <!-- TODO: Write a compelling 150-160 character description of your research -->
-  <meta name="description" content="BRIEF_DESCRIPTION_OF_YOUR_RESEARCH_CONTRIBUTION_AND_FINDINGS">
-  <!-- TODO: Add 5-10 relevant keywords for your research area -->
-  <meta name="keywords" content="KEYWORD1, KEYWORD2, KEYWORD3, machine learning, computer vision, AI">
-  <!-- TODO: List all authors -->
-  <meta name="author" content="FIRST_AUTHOR_NAME, SECOND_AUTHOR_NAME">
-  <meta name="robots" content="index, follow">
-  <meta name="language" content="English">
-  
-  <!-- Open Graph / Facebook -->
+  <meta name="title" content="Wave Forcing: Towards Speed-of-Light Streaming Video Generation">
+  <meta name="description" content="Wave Forcing turns sequential rolling-forcing video generation into a GPU wavefront, overlapping denoising and streaming VAE decoding.">
+  <meta name="keywords" content="video generation, diffusion, rolling forcing, pipeline parallelism, wavefront, streaming inference">
+  <meta name="author" content="MLSys Team, DENG Lab at Shanghai Jiao Tong University">
+  <meta name="theme-color" content="#07111f">
   <meta property="og:type" content="article">
-  <!-- TODO: Replace with your institution or lab name -->
-  <meta property="og:site_name" content="INSTITUTION_OR_LAB_NAME">
-  <!-- TODO: Same as paper title above -->
-  <meta property="og:title" content="PAPER_TITLE">
-  <!-- TODO: Same as description above -->
-  <meta property="og:description" content="BRIEF_DESCRIPTION_OF_YOUR_RESEARCH_CONTRIBUTION_AND_FINDINGS">
-  <!-- TODO: Replace with your actual website URL -->
-  <meta property="og:url" content="https://YOUR_DOMAIN.com/YOUR_PROJECT_PAGE">
-  <!-- TODO: Create a 1200x630px preview image and update path -->
-  <meta property="og:image" content="https://YOUR_DOMAIN.com/static/images/social_preview.png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="PAPER_TITLE - Research Preview">
-  <meta property="article:published_time" content="2024-01-01T00:00:00.000Z">
-  <meta property="article:author" content="FIRST_AUTHOR_NAME">
-  <meta property="article:section" content="Research">
-  <meta property="article:tag" content="KEYWORD1">
-  <meta property="article:tag" content="KEYWORD2">
-
-  <!-- Twitter -->
-  <meta name="twitter:card" content="summary_large_image">
-  <!-- TODO: Replace with your lab/institution Twitter handle -->
-  <meta name="twitter:site" content="@YOUR_TWITTER_HANDLE">
-  <!-- TODO: Replace with first author's Twitter handle -->
-  <meta name="twitter:creator" content="@AUTHOR_TWITTER_HANDLE">
-  <!-- TODO: Same as paper title above -->
-  <meta name="twitter:title" content="PAPER_TITLE">
-  <!-- TODO: Same as description above -->
-  <meta name="twitter:description" content="BRIEF_DESCRIPTION_OF_YOUR_RESEARCH_CONTRIBUTION_AND_FINDINGS">
-  <!-- TODO: Same as social preview image above -->
-  <meta name="twitter:image" content="https://YOUR_DOMAIN.com/static/images/social_preview.png">
-  <meta name="twitter:image:alt" content="PAPER_TITLE - Research Preview">
-
-  <!-- Academic/Research Specific -->
-  <meta name="citation_title" content="PAPER_TITLE">
-  <meta name="citation_author" content="FIRST_AUTHOR_LAST, FIRST_AUTHOR_FIRST">
-  <meta name="citation_author" content="SECOND_AUTHOR_LAST, SECOND_AUTHOR_FIRST">
-  <meta name="citation_publication_date" content="2024">
-  <meta name="citation_conference_title" content="CONFERENCE_NAME">
-  <meta name="citation_pdf_url" content="https://YOUR_DOMAIN.com/static/pdfs/paper.pdf">
-  
-  <!-- Additional SEO -->
-  <meta name="theme-color" content="#2563eb">
-  <meta name="msapplication-TileColor" content="#2563eb">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  
-  <!-- Preconnect for performance -->
+  <meta property="og:site_name" content="DENG Lab @ SJTU">
+  <meta property="og:title" content="Wave Forcing: Towards Speed-of-Light Streaming Video Generation">
+  <meta property="og:description" content="A wavefront runtime for high-throughput streaming video generation.">
+  <title>Wave Forcing — DENG Lab @ SJTU</title>
+  <link rel="icon" type="image/x-icon" href="static/images/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://ajax.googleapis.com">
-  <link rel="preconnect" href="https://documentcloud.adobe.com">
-  <link rel="preconnect" href="https://cdn.jsdelivr.net">
-
-
-  <!-- TODO: Replace with your paper title and authors -->
-  <title>Wave Forcing: Towards Speed-of-Light Streaming Video Generation</title>
-
-  <!-- Favicon and App Icons -->
-  <link rel="icon" type="image/x-icon" href="static/images/favicon.ico">
-  <link rel="apple-touch-icon" href="static/images/favicon.ico">
-
-  <!-- Critical CSS - Load synchronously -->
-  <link rel="stylesheet" href="static/css/bulma.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="static/css/index.css">
-  
-  <!-- Non-critical CSS - Load asynchronously -->
-  <link rel="preload" href="static/css/bulma-carousel.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-  <link rel="preload" href="static/css/bulma-slider.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-  <link rel="preload" href="static/css/fontawesome.all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-  <link rel="preload" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-  
-  <!-- Fallback for browsers that don't support preload -->
-  <noscript>
-    <link rel="stylesheet" href="static/css/bulma-carousel.min.css">
-    <link rel="stylesheet" href="static/css/bulma-slider.min.css">
-    <link rel="stylesheet" href="static/css/fontawesome.all.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
-  </noscript>
-  
-  <!-- Fonts - Optimized loading -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  
-  <!-- Defer non-critical JavaScript -->
-  <script defer src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-  <script defer src="https://documentcloud.adobe.com/view-sdk/main.js"></script>
-  <script defer src="static/js/fontawesome.all.min.js"></script>
-  <script defer src="static/js/bulma-carousel.min.js"></script>
-  <script defer src="static/js/bulma-slider.min.js"></script>
-  <script defer src="static/js/index.js"></script>
-  
-  <!-- Structured Data for Academic Papers -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "ScholarlyArticle",
-    "headline": "PAPER_TITLE",
-    "description": "BRIEF_DESCRIPTION_OF_YOUR_RESEARCH_CONTRIBUTION_AND_FINDINGS",
-    "author": [
-      {
-        "@type": "Person",
-        "name": "FIRST_AUTHOR_NAME",
-        "affiliation": {
-          "@type": "Organization",
-          "name": "INSTITUTION_NAME"
-        }
-      },
-      {
-        "@type": "Person",
-        "name": "SECOND_AUTHOR_NAME",
-        "affiliation": {
-          "@type": "Organization",
-          "name": "INSTITUTION_NAME"
-        }
-      }
-    ],
-    "datePublished": "2024-01-01",
-    "publisher": {
-      "@type": "Organization",
-      "name": "CONFERENCE_OR_JOURNAL_NAME"
-    },
-    "url": "https://YOUR_DOMAIN.com/YOUR_PROJECT_PAGE",
-    "image": "https://YOUR_DOMAIN.com/static/images/social_preview.png",
-    "keywords": ["KEYWORD1", "KEYWORD2", "KEYWORD3", "machine learning", "computer vision"],
-    "abstract": "FULL_ABSTRACT_TEXT_HERE",
-    "citation": "BIBTEX_CITATION_HERE",
-    "isAccessibleForFree": true,
-    "license": "https://creativecommons.org/licenses/by/4.0/",
-    "mainEntity": {
-      "@type": "WebPage",
-      "@id": "https://YOUR_DOMAIN.com/YOUR_PROJECT_PAGE"
-    },
-    "about": [
-      {
-        "@type": "Thing",
-        "name": "RESEARCH_AREA_1"
-      },
-      {
-        "@type": "Thing", 
-        "name": "RESEARCH_AREA_2"
-      }
-    ]
-  }
-  </script>
-  
-  <!-- Website/Organization Structured Data -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "INSTITUTION_OR_LAB_NAME",
-    "url": "https://YOUR_INSTITUTION_WEBSITE.com",
-    "logo": "https://YOUR_DOMAIN.com/static/images/favicon.ico",
-    "sameAs": [
-      "https://twitter.com/YOUR_TWITTER_HANDLE",
-      "https://github.com/YOUR_GITHUB_USERNAME"
-    ]
-  }
-  </script>
 </head>
 <body>
-
-
-  <!-- Scroll to Top Button -->
-  <button class="scroll-to-top" onclick="scrollToTop()" title="Scroll to top" aria-label="Scroll to top">
-    <i class="fas fa-chevron-up"></i>
-  </button>
-
-  <!-- More Works Dropdown -->
-  <div class="more-works-container">
-    <button class="more-works-btn" onclick="toggleMoreWorks()" title="View More Works from Our Lab">
-      <i class="fas fa-flask"></i>
-      More Works
-      <i class="fas fa-chevron-down dropdown-arrow"></i>
-    </button>
-    <div class="more-works-dropdown" id="moreWorksDropdown">
-      <div class="dropdown-header">
-        <h4>More Works from Our Lab</h4>
-        <button class="close-btn" onclick="toggleMoreWorks()">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-      <div class="works-list">
-        <a href="https://sjtu-deng-lab.github.io/mbd-lms/" class="work-item" target="_blank">
-          <div class="work-info">
-            <h5>Multi-Block Diffusion Language Models</h5>
-            <p>A training recipe, paradigm definition, and runnable inference path for practical Multi-Block Diffusion Language Models.</p>
-            <span class="work-venue">DENG Lab @ SJTU</span>
-          </div>
-          <i class="fas fa-external-link-alt"></i>
-        </a>
-        <a href="https://sjtu-deng-lab.github.io/Discrete-Diffusion-Forcing/" class="work-item" target="_blank">
-          <div class="work-info">
-            <h5>D2F: Diffusion LLMs Can Do Faster-Than-AR Inference via Discrete Diffusion Forcing</h5>
-            <p>A hybrid paradigm that enables Diffusion LLMs to surpass autoregressive models in inference speed for the first time, achieving up to 50x acceleration.</p>
-            <span class="work-venue">DENG Lab @ SJTU</span>
-          </div>
-          <i class="fas fa-external-link-alt"></i>
-        </a>
-      </div>
+  <nav class="topbar" aria-label="Main navigation">
+    <a class="brand" href="#top" aria-label="Wave Forcing home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Wave Forcing</span>
+    </a>
+    <div class="nav-links">
+      <a href="#idea">Idea</a>
+      <a href="#explorer">Explorer</a>
+      <a href="#transport">Transport</a>
+      <a href="#vae">VAE</a>
+      <a href="#results">Results</a>
+      <a class="nav-code" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">Code ↗</a>
     </div>
-  </div>
+  </nav>
 
-  <main id="main-content">
-  <section class="hero">
-    <div class="hero-body">
-      <div class="container is-max-desktop">
-        <div class="columns is-centered">
-          <div class="column has-text-centered">
-            <div class="lab-logos">
-              <img src="static/images/sjtu-logo-only.png" alt="Shanghai Jiao Tong University" class="sjtu-logo" loading="lazy"/>
-              <img src="static/images/sjtu-deng-lab.png" alt="SJTU DENG Lab" class="lab-logo" loading="lazy"/>
+  <main id="top">
+    <section class="hero-section">
+      <div class="hero-glow glow-one"></div>
+      <div class="hero-glow glow-two"></div>
+      <div class="hero-copy reveal">
+        <div class="lab-lockup">
+          <img src="static/images/sjtu-logo-only.png" alt="Shanghai Jiao Tong University">
+          <span>DENG Lab · MLSys</span>
+        </div>
+        <p class="eyebrow"><span class="live-dot"></span> Streaming video, re-architected</p>
+        <h1>Generate video<br>at the speed of a <em>wave.</em></h1>
+        <p class="hero-lede">Wave Forcing maps consecutive denoising steps onto different GPUs, then streams completed chunks directly into a parallel VAE. After the pipeline fills, a new video chunk emerges every tick.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#explorer">Run the pipeline</a>
+          <a class="button secondary" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">View code <span>↗</span></a>
+        </div>
+        <div class="hero-metrics" aria-label="Headline results">
+          <div><strong>99.8</strong><span>frames / second</span></div>
+          <div><strong>6.2×</strong><span>faster than realtime</span></div>
+          <div><strong>8</strong><span>H200 GPUs</span></div>
+        </div>
+      </div>
+      <div class="hero-visual reveal" aria-hidden="true">
+        <div class="orbital-ring ring-a"></div><div class="orbital-ring ring-b"></div>
+        <div class="hero-wave" id="heroWave"></div>
+        <div class="hero-badge badge-a"><span>Denoise</span><b>5-stage</b></div>
+        <div class="hero-badge badge-b"><span>Decode</span><b>3-stage VAE</b></div>
+      </div>
+      <a href="#idea" class="scroll-cue" aria-label="Scroll to the idea"><span></span>Explore</a>
+    </section>
+
+    <section class="section light" id="idea">
+      <div class="section-head reveal">
+        <p class="kicker">01 · The bottleneck</p>
+        <h2>A sequential algorithm leaves parallel hardware waiting.</h2>
+        <p>Rolling Forcing generates a long video chunk by chunk. Each chunk normally walks through every denoising step before the next chunk can advance. More GPUs do not help if they all wait on the same chain.</p>
+      </div>
+      <div class="comparison reveal">
+        <article class="compare-card serial-card">
+          <div class="card-label"><span>Conventional</span><b>Serial execution</b></div>
+          <div class="serial-track" aria-hidden="true">
+            <div class="serial-block s1">D₁</div><div class="serial-arrow">→</div>
+            <div class="serial-block s2">D₂</div><div class="serial-arrow">→</div>
+            <div class="serial-block s3">D₃</div><div class="serial-arrow">→</div>
+            <div class="serial-block s4">D₄</div><div class="serial-arrow">→</div>
+            <div class="serial-block vae">VAE</div>
+          </div>
+          <p>One chunk completes the full chain before useful work moves forward.</p>
+        </article>
+        <div class="turn-arrow" aria-hidden="true">↘</div>
+        <article class="compare-card wave-card">
+          <div class="card-label"><span>Wave Forcing</span><b>Spatialized time</b></div>
+          <div class="mini-wave" aria-hidden="true">
+            <div class="mw-row"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="mw-row"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="mw-row"><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <p>Different chunks occupy different denoising stages at the same time.</p>
+        </article>
+      </div>
+      <div class="principle-grid reveal">
+        <div><span>1</span><h3>Split the steps</h3><p>Place each denoising step on its own GPU rank, plus one store rank for clean context.</p></div>
+        <div><span>2</span><h3>Move a wavefront</h3><p>Exchange in-flight KV at each layer so multiple chunks advance diagonally together.</p></div>
+        <div><span>3</span><h3>Decode while generating</h3><p>Send finished latents into a time-balanced, multi-stage streaming VAE pipeline.</p></div>
+      </div>
+    </section>
+
+    <section class="section dark" id="explorer">
+      <div class="section-head reveal">
+        <p class="kicker">02 · Interactive pipeline</p>
+        <h2>Two pipelines work at two different scales.</h2>
+        <p>Chunks form a wave across GPUs. Inside every chunk, layer-wise KV communication is prefetched and hidden under the longer computation on the critical rank.</p>
+      </div>
+
+      <div class="overlap-story reveal">
+        <div class="story-heading">
+          <div>
+            <p class="micro-kicker">Inside one diffusion tick</p>
+            <h3>The slow rank is not just a bottleneck.<br>It is our overlap window.</h3>
+          </div>
+          <div class="context-key">
+            <span><i class="key-compute"></i>Compute</span>
+            <span><i class="key-comm"></i>KV transfer</span>
+            <span><i class="key-wait"></i>Exposed wait</span>
+          </div>
+        </div>
+
+        <div class="causal-explainer">
+          <div class="context-stack long-context">
+            <div class="context-title"><span>Critical rank · r0</span><b>8-chunk context</b></div>
+            <div class="context-cells"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <p>Older chunk, longest attention context → more compute per layer</p>
+          </div>
+          <div class="lead-arrow"><span>compute lead creates slack</span><b>→</b></div>
+          <div class="context-stack short-context">
+            <div class="context-title"><span>Later ranks · r1–store</span><b>≈5-chunk context</b></div>
+            <div class="context-cells"><i></i><i></i><i></i><i></i><i></i></div>
+            <p>Shorter context → KV becomes ready before r0 needs it</p>
+          </div>
+        </div>
+
+        <div class="schedule-controls">
+          <button id="schedulePlay" class="schedule-play" type="button"><span class="pause-icon"></span><b>Pause comparison</b></button>
+          <div class="schedule-progress"><i id="scheduleProgress"></i></div>
+          <span id="scheduleClock">0 μs</span>
+        </div>
+
+        <div class="schedule-compare">
+          <article class="schedule-card sync-schedule">
+            <div class="schedule-card-head">
+              <div><span>A · synchronized</span><h4>Compute, stop, communicate.</h4></div>
+              <strong>Barrier every layer</strong>
             </div>
-            <!-- TODO: Replace with your paper title -->
-            <h1 class="title is-1 publication-title">Wave Forcing: Towards Speed-of-Light Streaming Video Generation</h1>
-            <div class="is-size-5 publication-authors">
-              <span class="author-block">
-                <a href="https://github.com/orgs/SJTU-DENG-Lab/teams/deng-lab-mlsys" target="_blank">MLSys Team</a>,
-              </span>
-              <span class="author-block">
-                <a href="https://SJTU-DENG-Lab.github.io/" target="_blank">DENG Lab @ SJTU</a>
-              </span>
+            <div class="schedule-canvas" data-schedule="sync">
+              <div class="time-axis"><span>Layer L</span><span>L+1</span><span>L+2</span><span>L+3</span><span>L+4</span><span>L+5</span></div>
+              <div class="lane"><label>r0 · 8 chunks</label><div class="lane-track sync-r0"></div></div>
+              <div class="lane"><label>r1 · 7 chunks</label><div class="lane-track sync-r1"></div></div>
+              <div class="lane"><label>r2 · 6 chunks</label><div class="lane-track sync-r2"></div></div>
+              <div class="lane"><label>r3 · 5 chunks</label><div class="lane-track sync-r3"></div></div>
+              <div class="lane"><label>store · clean KV</label><div class="lane-track sync-store"></div></div>
+              <div class="lane link-lane"><label>NVLink collective</label><div class="lane-track sync-link"></div></div>
+              <div class="schedule-cursor"></div>
             </div>
+            <div class="schedule-caption bad-caption"><i></i><p><b>Communication stays exposed.</b> Faster ranks wait at all_gather; the next layer cannot begin until transfer and synchronization finish.</p></div>
+          </article>
 
-            <div class="is-size-5 publication-authors">
-              <span class="author-block">Shanghai Jiao Tong University</span>
+          <article class="schedule-card overlap-schedule">
+            <div class="schedule-card-head">
+              <div><span>B · overlapped</span><h4>Prefetch, compute, gate.</h4></div>
+              <strong>Depth-1 async P2P</strong>
             </div>
+            <div class="schedule-canvas" data-schedule="overlap">
+              <div class="time-axis"><span>Layer L</span><span>L+1</span><span>L+2</span><span>L+3</span><span>L+4</span><span>L+5</span></div>
+              <div class="lane"><label>r0 · 8 chunks</label><div class="lane-track overlap-r0"></div></div>
+              <div class="lane"><label>r1 · 7 chunks</label><div class="lane-track overlap-r1"></div></div>
+              <div class="lane"><label>r2 · 6 chunks</label><div class="lane-track overlap-r2"></div></div>
+              <div class="lane"><label>r3 · 5 chunks</label><div class="lane-track overlap-r3"></div></div>
+              <div class="lane"><label>store · clean KV</label><div class="lane-track overlap-store"></div></div>
+              <div class="lane link-lane"><label>NVLink P2P</label><div class="lane-track overlap-link"></div></div>
+              <div class="schedule-cursor"></div>
+            </div>
+            <div class="hidden-bracket"><span>Each rank publishes early; six consecutive KV transfers stay under r0's compute windows</span></div>
+            <div class="schedule-caption good-caption"><i></i><p><b>Communication moves off the critical path.</b> At the point of use, r0 only gates on any residual transfer instead of paying the full communication cost.</p></div>
+          </article>
+        </div>
 
-                  <div class="column has-text-centered">
-                    <div class="publication-links">
-                      <!-- TODO: Replace with your paper link once published -->
-                      <span class="link-block">
-                        <button class="button is-normal is-rounded is-dark" disabled>
-                          <span class="icon">
-                            <i class="fas fa-file-pdf"></i>
-                          </span>
-                          <span>Paper (Coming Soon)</span>
-                        </button>
-                      </span>
+        <div class="measured-slack">
+          <div><span>Measured 14B steady stage</span><strong>r0 · 646 ms</strong></div>
+          <div class="slack-bar"><i></i><b>≈70 ms of downstream slack</b></div>
+          <div><span>r1 / r2 / r3 / store</span><strong>575–581 ms</strong></div>
+        </div>
+      </div>
 
-                      <!-- TODO: Add a Supplementary button here when you have a supplementary PDF -->
+      <div class="pipeline-intro reveal">
+        <p class="micro-kicker">Across consecutive video chunks</p>
+        <h3>Now zoom out: the whole wavefront.</h3>
+        <p>The layer-level overlap above happens repeatedly inside every active diffusion rank below.</p>
+      </div>
 
-                      <span class="link-block">
-                        <a href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank"
-                        class="external-link button is-normal is-rounded is-dark">
-                          <span class="icon">
-                            <i class="fab fa-github"></i>
-                          </span>
-                          <span>Code</span>
-                        </a>
-                      </span>
+      <div class="pipeline-shell reveal">
+        <div class="pipeline-toolbar">
+          <div class="toolbar-left">
+            <button id="playButton" class="play-button" type="button" aria-label="Pause animation"><span class="pause-icon"></span><b>Pause</b></button>
+            <button id="stepButton" class="step-button" type="button">Step +1</button>
+          </div>
+          <div class="timeline-wrap">
+            <label for="timeline">Pipeline tick <output id="tickOutput">0</output></label>
+            <input id="timeline" type="range" min="0" max="14" value="0" step="1">
+          </div>
+          <div class="speed-control" role="group" aria-label="Animation speed">
+            <button data-speed="1400">0.5×</button><button class="active" data-speed="800">1×</button><button data-speed="420">2×</button>
+          </div>
+        </div>
 
-                      <!-- TODO: Add an arXiv button here once the paper is published -->
-                    </div>
+        <div class="pipeline-stage">
+          <div class="stage-title"><span class="stage-dot diffusion-dot"></span><b>Layer 1 · Wavefront compute</b><small>5 ranks · causal DiT</small></div>
+          <div class="rank-grid" id="diffusionGrid"></div>
+          <div class="transport-layer">
+            <div class="stage-title transport-title"><span class="stage-dot transport-dot"></span><b>Layer 2 · KV transport fabric</b><small>copy engine · one-sided direct write</small></div>
+            <div class="transport-fabric" id="transportFabric" aria-label="KV packets moving between diffusion ranks">
+              <span class="fabric-label from-label">producer KV</span>
+              <div class="fabric-line"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <span class="fabric-chip">CE</span>
+              <div class="fabric-line reverse"><i></i><i></i><i></i><i></i></div>
+              <span class="fabric-label to-label">consumer slots</span>
+            </div>
+          </div>
+          <div class="bridge" aria-hidden="true"><span>completed latent chunks leave the diffusion fabric</span><i></i></div>
+          <div class="stage-title vae-title"><span class="stage-dot vae-dot"></span><b>Layer 3 · Streaming VAE decode</b><small>3 ranks · time-balanced split</small></div>
+          <div class="rank-grid vae-grid" id="vaeGrid"></div>
+        </div>
+
+        <div class="pipeline-readout" aria-live="polite">
+          <div><span>Now</span><strong id="phaseTitle">Filling the pipeline</strong></div>
+          <p id="phaseDescription">The first noisy chunk enters denoise rank D₁. Later chunks will follow one tick apart.</p>
+          <div class="readout-stats">
+            <span><i id="activeCount">1</i> active ranks</span>
+            <span><i id="outputCount">0</i> chunks decoded</span>
+            <span><i>≈115 ms</i> per steady tick</span>
           </div>
         </div>
       </div>
-    </div>
-  </div>
-</section>
 
+      <div class="detail-grid reveal">
+        <article><div class="detail-icon">KV</div><h3>Layer-wise context exchange</h3><p>At every transformer layer, ranks all-gather in-flight KV while the store rank contributes clean KV in real time.</p></article>
+        <article><div class="detail-icon">↝</div><h3>Deterministic re-noise</h3><p>A deterministic seed per chunk and stage preserves reproducibility while chunks travel through independent ranks.</p></article>
+        <article><div class="detail-icon">≋</div><h3>Two disjoint NCCL worlds</h3><p>Diffusion and VAE use separate communicators, connected by a CPU queue, avoiding cross-pipeline deadlocks.</p></article>
+        <article><div class="detail-icon">Δt</div><h3>Measured-time VAE split</h3><p>Stages are partitioned by observed runtime instead of FLOPs, balancing memory-bound high-resolution decoder blocks.</p></article>
+      </div>
+    </section>
 
-<!-- teaser video section removed (no assets yet). Re-add from Academic-project-page-template when you have your own media. -->
+    <section class="section transport-section light" id="transport">
+      <div class="section-head reveal">
+        <p class="kicker">03 · End-to-end KV transport</p>
+        <h2>Optimize bytes, movement, and destination.</h2>
+        <p>Communication is not one cost. Wave Forcing attacks three different taxes: how many bytes move, who coordinates the move, and whether the consumer must rebuild the buffer afterward.</p>
+      </div>
 
-<!-- Paper abstract -->
-<section class="section hero is-light">
-  <div class="container is-max-desktop">
-    <div class="columns is-centered has-text-centered">
-      <div class="column is-four-fifths">
-        <h2 class="title is-3">Abstract</h2>
-        <div class="content has-text-justified">
-          <!-- TODO: Replace with your paper abstract -->
-          <p>
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin ullamcorper tellus sed ante aliquam tempus. Etiam porttitor urna feugiat nibh elementum, et tempor dolor mattis. Donec accumsan enim augue, a vulputate nisi sodales sit amet. Proin bibendum ex eget mauris cursus euismod nec et nibh. Maecenas ac gravida ante, nec cursus dui. Vivamus purus nibh, placerat ac purus eget, sagittis vestibulum metus. Sed vestibulum bibendum lectus gravida commodo. Pellentesque auctor leo vitae sagittis suscipit.
-          </p>
+      <div class="transport-explorer reveal">
+        <div class="transport-tabs" role="tablist" aria-label="KV transport optimization modes">
+          <button class="active" data-transport="sync" role="tab"><span>Baseline</span><b>BF16 + sync</b></button>
+          <button data-transport="fp8" role="tab"><span>Fewer bytes</span><b>FP8 KV</b></button>
+          <button data-transport="ce" role="tab"><span>Better movement</span><b>CE one-sided</b></button>
+          <button data-transport="paged" role="tab"><span>Direct destination</span><b>Paged write</b></button>
+        </div>
+
+        <div class="transport-visual" data-mode="sync">
+          <div class="memory-node producer-node">
+            <span>Producer GPU</span><b>Layer L · K/V ready</b>
+            <div class="memory-stack"><i></i><i></i><i></i><i></i></div>
+          </div>
+
+          <div class="transport-route">
+            <div class="route-label"><span id="routeEngine">NCCL collective</span><b id="routeBandwidth">BF16 · 2 bytes / value</b></div>
+            <div class="packet-road" id="packetRoad">
+              <div class="packet packet-a">KV</div><div class="packet packet-b">KV</div><div class="packet packet-c">KV</div><div class="packet packet-d">KV</div>
+              <div class="road-line"></div>
+            </div>
+            <div class="transport-toll quant-toll" id="quantToll"><span>Q</span><b>quant / dequant</b></div>
+            <div class="transport-wall collective-wall" id="collectiveWall"><i></i><b>matching collective wall</b></div>
+            <div class="generation-flag" id="generationFlag"><i></i><span>generation flag</span></div>
+          </div>
+
+          <div class="memory-node consumer-node">
+            <span>Consumer GPU · r0</span><b id="consumerAction">Receive, then assemble</b>
+            <div class="attention-buffer">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <div class="cat-wall" id="catWall"><span>torch.cat</span><b>assembly wall</b></div>
+          </div>
+        </div>
+
+        <div class="transport-readout">
+          <div class="transport-summary"><span id="transportStep">Baseline · synchronized BF16</span><h3 id="transportTitle">Every rank joins; every byte is full width.</h3><p id="transportDescription">Blocking all_gather moves BF16 KV through a matching collective. The consumer then concatenates received segments into an attention buffer at every layer.</p></div>
+          <div class="transport-metric"><span id="metricLabel">Critical-path communication</span><strong id="metricValue">≈79 ms</strong><small id="metricNote">14B diagnostic</small></div>
         </div>
       </div>
-    </div>
-  </div>
-</section>
-<!-- End paper abstract -->
 
-
-<!-- image carousel section removed (no assets yet). Re-add from Academic-project-page-template when you have your own media. -->
-
-
-
-
-<!-- youtube video section removed (no assets yet). Re-add from Academic-project-page-template when you have your own media. -->
-
-
-<!-- video carousel section removed (no assets yet). Re-add from Academic-project-page-template when you have your own media. -->
-
-
-
-
-
-
-<!-- paper poster section removed (no assets yet). Re-add from Academic-project-page-template when you have your own media. -->
-
-
-
-<!--BibTex citation -->
-  <section class="section" id="BibTeX">
-    <div class="container is-max-desktop content">
-      <div class="bibtex-header">
-        <h2 class="title">BibTeX</h2>
-        <button class="copy-bibtex-btn" onclick="copyBibTeX()" title="Copy BibTeX to clipboard">
-          <i class="fas fa-copy"></i>
-          <span class="copy-text">Copy</span>
-        </button>
+      <div class="optimization-map reveal">
+        <article><span>01 · Precision</span><h3>FP8 halves DMA bytes.</h3><div class="byte-compare"><i class="bf16-byte"></i><i class="bf16-byte"></i><b>→</b><i class="fp8-byte"></i></div><p>Raw communication falls from roughly 79 to 40 ms. But conversion is not free: with SageAttention, requantization costs more than the saved transfer time.</p><small>Effective standalone · experimental with Sage</small></article>
+        <article><span>02 · Transport</span><h3>Copy Engine removes the collective wall.</h3><div class="ce-path"><i>GPU A</i><b>CE / NVLink</b><i>GPU B</i></div><p>The producer writes remote IPC memory using <code>cuMemcpyPeerAsync</code>. A device-side generation flag replaces matching NCCL send/recv synchronization.</p><small>0 SM copy path · 343 GB/s microbenchmark</small></article>
+        <article class="recommended"><span>03 · Layout</span><h3>Paged writes remove the assembly wall.</h3><div class="slot-path"><i></i><i></i><i></i><i></i><i></i><i></i></div><p>Each producer writes directly into its fixed slot in the consumer's contiguous attention buffer. Attention reads the prefix in place—no per-layer reconstruction.</p><small>torch.cat: 18.49 → 4.08 ms · recommended</small></article>
       </div>
-      <pre id="bibtex-code"><code>@article{YourPaperKey2024,
-  title={Your Paper Title Here},
-  author={First Author and Second Author and Third Author},
-  journal={Conference/Journal Name},
-  year={2024},
-  url={https://your-domain.com/your-project-page}
-}</code></pre>
-    </div>
-</section>
-<!--End BibTex citation -->
 
+      <div class="compatibility-note reveal"><b>Why this is not one linear stack</b><p>FP8 KV is a byte-reduction experiment; current paged transport is BF16 and does not yet support FP8 one-sided slots. The best measured route is <strong>SageAttention + BF16 paged direct-write</strong>: 431.9 ms/tick on the 14B setup.</p></div>
+    </section>
 
-  <footer class="footer">
-  <div class="container">
-    <div class="columns is-centered">
-      <div class="column is-8">
-        <div class="content">
+    <section class="section vae-section" id="vae">
+      <div class="section-head reveal">
+        <p class="kicker">04 · VAE without bubbles</p>
+        <h2>Overlap work across GPUs,<br>not on the same SMs.</h2>
+        <p>Once 1.3B diffusion is optimized to the limit, decode becomes the final barrier. Launching the next chunk before the current decode finishes sounds parallel—but on one GPU, both chunks compete for the same SMs and each becomes slower.</p>
+      </div>
 
-          <p>
-            This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a> which was adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
-            You are free to borrow the source code of this website, we just ask that you link back to this page in the footer. <br> This website is licensed under a <a rel="license"  href="http://creativecommons.org/licenses/by-sa/4.0/" target="_blank">Creative
-            Commons Attribution-ShareAlike 4.0 International License</a>.
-          </p>
+      <div class="vae-contention reveal">
+        <article class="contention-card wrong-overlap">
+          <div class="contention-head"><div><span>A · tempting, but slower</span><h3>Concurrent chunks on one GPU</h3></div><b>SM contention</b></div>
+          <div class="sm-pool">
+            <div class="sm-label"><span>GPU 5 · shared SM pool</span><strong>160% requested</strong></div>
+            <div class="sm-meter"><i></i><i></i></div>
+          </div>
+          <div class="contention-timeline">
+            <div class="ct-axis"><span>0</span><span>time</span><span>→</span></div>
+            <div class="ct-row"><label>Chunk C1</label><i class="decode-bar decode-one">decode C1</i></div>
+            <div class="ct-row"><label>Chunk C2</label><i class="decode-bar decode-two">decode C2</i></div>
+            <div class="collision-zone"><span>both kernels fight for SMs</span></div>
+          </div>
+          <p class="contention-note"><i></i>Overlapping two compute-bound decodes does not create free capacity. It stretches both jobs and makes the pipeline tick longer.</p>
+        </article>
 
+        <article class="contention-card right-pipeline">
+          <div class="contention-head"><div><span>B · Wave Forcing</span><h3>One chunk per GPU stage</h3></div><b>No same-GPU overlap</b></div>
+          <div class="vae-wave-grid" id="vaeWaveGrid">
+            <div class="vwg-corner"></div><div class="vwg-tick">Tick T</div><div class="vwg-tick">T+1</div><div class="vwg-tick">T+2</div><div class="vwg-tick">T+3</div>
+            <div class="vwg-rank">GPU 5 · early</div><i data-vae-phase="0" style="--vc:#20d7d0">C1</i><i data-vae-phase="1" style="--vc:#8b7cff">C2</i><i data-vae-phase="2" style="--vc:#c8ff58">C3</i><i data-vae-phase="3" style="--vc:#ff9a5b">C4</i>
+            <div class="vwg-rank">GPU 6 · middle</div><span></span><i data-vae-phase="1" style="--vc:#20d7d0">C1</i><i data-vae-phase="2" style="--vc:#8b7cff">C2</i><i data-vae-phase="3" style="--vc:#c8ff58">C3</i>
+            <div class="vwg-rank">GPU 7 · output</div><span></span><span></span><i data-vae-phase="2" style="--vc:#20d7d0">C1</i><i data-vae-phase="3" style="--vc:#8b7cff">C2</i>
+            <div class="vae-grid-cursor" id="vaeGridCursor"></div>
+          </div>
+          <p class="contention-note good"><i></i>Each GPU owns a contiguous decoder stage and its temporal cache. Consecutive chunks overlap spatially across GPUs, never by contending on one GPU.</p>
+        </article>
+      </div>
+
+      <div class="balance-explainer reveal">
+        <div class="balance-copy">
+          <p class="micro-kicker">Why equal FLOPs are not equal time</p>
+          <h3>Partition the measured latency,<br>not the spreadsheet.</h3>
+          <p>High-resolution upsample blocks are memory-bound at 480×832. Blocks with similar FLOPs can take roughly 6× different wall time, so a FLOPs split leaves one stage overloaded and the others waiting.</p>
+          <div class="balance-fact"><span>Algorithm</span><b>Contiguous DP min–max partition</b></div>
+          <div class="balance-fact"><span>Correctness</span><b>Bit-exact vs. the original split</b></div>
+        </div>
+
+        <div class="balance-chart">
+          <div class="balance-mode flops-mode">
+            <div class="balance-title"><span>FLOPs-balanced split</span><b>≈1.8× time imbalance</b></div>
+            <div class="stage-duration"><label>GPU 5</label><i style="--duration:58%"><span>Stage A</span></i></div>
+            <div class="stage-duration"><label>GPU 6</label><i class="barrier-stage" style="--duration:100%"><span>Stage B · 146 ms barrier</span></i></div>
+            <div class="stage-duration"><label>GPU 7</label><i style="--duration:65%"><span>Stage C</span></i></div>
+            <div class="barrier-line"><span>pipeline waits here</span></div>
+          </div>
+          <div class="balance-arrow"><span>measure every decoder unit</span><b>↓</b></div>
+          <div class="balance-mode time-mode">
+            <div class="balance-title"><span>Time-balanced split</span><b>99 ms max stage</b></div>
+            <div class="stage-duration"><label>GPU 5</label><i style="--duration:96%"><span>Stage A · 95 ms</span></i></div>
+            <div class="stage-duration"><label>GPU 6</label><i style="--duration:100%"><span>Stage B · 99 ms</span></i></div>
+            <div class="stage-duration"><label>GPU 7</label><i style="--duration:97%"><span>Stage C · 96 ms</span></i></div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
-</footer>
 
-<!-- Statcounter tracking code -->
-  
-<!-- You can add a tracker to track page visits by creating an account at statcounter.com -->
+      <div class="barrier-proof reveal">
+        <div class="proof-label"><span>End-to-end steady tick</span><h3>The VAE finishes before the next latent arrives.</h3></div>
+        <div class="proof-timeline">
+          <div class="proof-track diffusion-proof"><label>Diffusion cadence</label><i><b>≈115 ms / tick</b></i></div>
+          <div class="proof-track vae-proof"><label>Balanced VAE</label><i><b>≈99 ms / chunk</b></i><span>≈16 ms headroom · no bubble</span></div>
+          <div class="arrival-mark mark-start"><i></i><span>chunk arrives</span></div>
+          <div class="arrival-mark mark-next"><i></i><span>next chunk</span></div>
+        </div>
+      </div>
+    </section>
 
-    <!-- End of Statcounter Code -->
+    <section class="section results" id="results">
+      <div class="section-head reveal">
+        <p class="kicker">05 · Throughput</p>
+        <h2>Pipeline depth becomes throughput.</h2>
+        <p>Once filled, latency no longer scales with the number of denoising steps in the usual way: every tick retires another chunk.</p>
+      </div>
+      <div class="result-layout reveal">
+        <div class="result-hero">
+          <span>60-second video · 957 pixel frames</span>
+          <strong><i class="count-up" data-target="99.8">0</i><small> FPS</small></strong>
+          <p>9.62 seconds end-to-end on 8× H200, using SageAttention and a time-balanced VAE split.</p>
+        </div>
+        <div class="bar-chart" aria-label="Frames per second comparison">
+          <div class="chart-row"><div class="chart-label"><span>Single GPU baseline</span><b>13.6 FPS</b></div><div class="bar-track"><i style="--width:13.6%"></i></div></div>
+          <div class="chart-row"><div class="chart-label"><span>Wave parallel</span><b>60 FPS</b></div><div class="bar-track"><i style="--width:60%"></i></div></div>
+          <div class="chart-row featured"><div class="chart-label"><span>+ SageAttention + balanced VAE</span><b>99.8 FPS</b></div><div class="bar-track"><i style="--width:99.8%"></i></div></div>
+        </div>
+      </div>
+      <div class="caveat reveal"><span>Quality note</span><p>The architecture is exact with the time-balanced VAE split. SageAttention is near-lossless per step; practical long-video quality is primarily bounded by the current Wan2.1 1.3B rolling-forcing checkpoint.</p></div>
+    </section>
 
+    <section class="closing">
+      <div class="closing-wave" aria-hidden="true"></div>
+      <p class="kicker">The core idea</p>
+      <h2>Do not make one GPU run faster.<br><em>Make time run in parallel.</em></h2>
+      <div class="closing-links"><a class="button primary" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">Explore the code ↗</a><span>Paper & models coming soon</span></div>
+    </section>
   </main>
-  </body>
-  </html>
+
+  <footer>
+    <div class="footer-brand"><span class="brand-mark"><i></i><i></i><i></i></span><b>Wave Forcing</b></div>
+    <p>MLSys Team · DENG Lab · Shanghai Jiao Tong University</p>
+    <a href="https://SJTU-DENG-Lab.github.io/" target="_blank" rel="noopener">DENG Lab ↗</a>
+  </footer>
+  <script src="static/js/index.js"></script>
+</body>
+</html>
