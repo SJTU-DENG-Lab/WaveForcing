@@ -1,0 +1,55 @@
+[project]
+name = "wave-parallel"
+version = "0.1.0"
+description = "Wavefront pipeline parallelism for long video generation (Rolling Forcing)"
+# Python 3.12: the sgl-dlab stack (torch 2.11, sglang-kernel 0.4.4, torchcodec,
+# flashinfer) has reliable cp312 wheels; cp313 coverage is spotty. 3.10 is dropped.
+requires-python = ">=3.12,<3.13"
+# NOTE: this project pins the sgl-dlab runtime stack. torch is the cu128 build
+# (torch==2.11.0 plain on PyPI is the cu130 build -> "driver too old" on the 12.9
+# driver here); install torch/vision/audio from the cu128 index (tool.uv.sources
+# below), and let the editable sglang install (uv pip install -e sgl-dlab/python[diffusion])
+# own the heavy deps (numpy 2.x, diffusers 0.37, transformers 5.x, sglang-kernel, ...).
+dependencies = [
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "torchaudio==2.11.0",
+    "diffusers>=0.37.0",
+    "transformers>=4.49.0",
+    "accelerate>=1.1.1",
+    "safetensors>=0.4",
+    "omegaconf>=2.3",
+    "einops>=0.8",
+    "ftfy",
+    "opencv-python-headless>=4.9",
+    "numpy>=2.0",
+    "peft>=0.10",
+    "imageio>=2.31",
+    "imageio-ffmpeg",
+    "av>=13.1",
+    "tqdm",
+    # flashinfer 0.6.12 (pulled by sglang) JIT-compiles rmsnorm via the cutlass
+    # DSL; cutlass-dsl 4.5.2 broke the MLIR GPUModuleOp API -> pybind TypeError in
+    # the DiT qk-norm forward.  Pin to 4.5.1 (flashinfer requires >=4.5.0).
+    "nvidia-cutlass-dsl==4.5.1",
+]
+
+[project.scripts]
+naive-rt-serve = "naive_rt.wave.serve:main"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["naive_rt"]
