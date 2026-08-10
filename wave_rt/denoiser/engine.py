@@ -124,6 +124,12 @@ class WaveDenoiser(
         self._pg_dst: dict = {}
         self._pg_naw = 0
         self._pg_wmax = 0
+        # Every cuIpcOpenMemHandle call must be paired with an explicit close while
+        # the importing CUDA context is still current.  A resident server creates a
+        # fresh WaveDenoiser per request, so relying on process teardown leaks one
+        # full set of peer mappings per request.
+        self._ipc_handles: list[int] = []
+        self._closed = False
 
         self._physical_skew_ms = float(os.environ.get("WAVE_PHYSICAL_SKEW_MS", "0"))
         self._skew_cycles = 0
@@ -140,6 +146,70 @@ class WaveDenoiser(
             self._st_prefetch = torch.cuda.Stream(device=self.device)
         elif self._paged:
             self._init_paged()
+
+    def _ipc_open(self, handle_bytes: bytes) -> int:
+        """Open and retain the raw base pointer needed by cuIpcCloseMemHandle."""
+        ptr = self._p2p.ipc_open_handle(handle_bytes)
+        self._ipc_handles.append(ptr)
+        return ptr
+
+    def close(self, *, coordinated: bool = True) -> None:
+        """Release per-request CUDA IPC mappings and their exported slabs.
+
+        Successful requests close cooperatively: all ranks first drain their CUDA
+        work, then close imported handles, then cross a second barrier before any
+        rank releases allocations exported to its peers.  On an exception path the
+        launcher passes ``coordinated=False`` because another rank may already have
+        left the process group; cleanup remains best-effort without collectives.
+        """
+        if self._closed:
+            return
+        self._closed = True
+
+        errors: list[tuple[str, Exception]] = []
+
+        def attempt(label, fn) -> None:
+            try:
+                fn()
+            except Exception as exc:
+                errors.append((label, exc))
+
+        if self._os_scopy is not None:
+            attempt("copy-stream synchronize", self._os_scopy.synchronize)
+        attempt("device synchronize", lambda: torch.cuda.synchronize(self.device))
+        if coordinated:
+            attempt("pre-close barrier", self.be.barrier)
+
+        handles = self._ipc_handles
+        self._ipc_handles = []
+        closer = getattr(self, "_p2p", None)
+        if closer is not None:
+            for ptr in reversed(handles):
+                attempt(
+                    f"ipc_close_handle({ptr:#x})",
+                    lambda ptr=ptr: closer.ipc_close_handle(ptr),
+                )
+
+        if coordinated:
+            attempt("post-close barrier", self.be.barrier)
+
+        # Imported mappings are gone on every healthy rank, so exporters may now
+        # release their local allocations.  Clearing these references also makes
+        # the method idempotent and lets the caching allocator reuse the slabs.
+        self._os_dst.clear()
+        self._pg_dst.clear()
+        self._rl_down = None
+        self._os_pending.clear()
+        self._os_scopy = None
+        self._st_prefetch = None
+        self._st_ev.clear()
+        self._os_kv = self._os_flags = None
+        self._pg_k = self._pg_v = None
+        self._rl_kv = self._rl_flags = None
+
+        if errors:
+            details = "; ".join(f"{label}: {exc!r}" for label, exc in errors)
+            raise RuntimeError(f"WaveDenoiser cleanup failed: {details}") from errors[0][1]
 
     def _act_denoise(self, n: int, t: int) -> bool:
         c = t - n

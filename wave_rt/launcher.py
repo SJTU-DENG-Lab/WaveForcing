@@ -17,11 +17,29 @@ def _worker(rank: int, cfg: WaveConfig, q=None, meta_q=None, req_q=None) -> None
     from wave_rt.denoiser import WaveDenoiser
     from wave_rt.runtime.backend import WaveBackend
 
+    def run_denoiser(*, out_dir=None, warmup=True, save=True) -> None:
+        denoiser = WaveDenoiser(backend, cfg, q=q, meta_q=meta_q)
+        try:
+            denoiser.run(out_dir=out_dir, warmup=warmup, save=save)
+        except BaseException:
+            # A failed rank may have left the distributed world, so never enter a
+            # cleanup collective here.  Preserve the original exception even if
+            # the now-broken CUDA context also rejects best-effort handle closes.
+            try:
+                denoiser.close(coordinated=False)
+            except Exception as cleanup_exc:
+                print(f"[wave_rt] rank {rank} cleanup after failure: "
+                      f"{cleanup_exc!r}", flush=True)
+            raise
+        else:
+            denoiser.close()
+
     backend = WaveBackend(cfg, rank)
     try:
         backend.init()
         if req_q is None:
-            WaveDenoiser(backend, cfg, q=q, meta_q=meta_q).run()
+            # one-shot: single generation with the config's prompt/seed/frames.
+            run_denoiser()
         else:
             while True:
                 req = req_q.get()
@@ -35,8 +53,8 @@ def _worker(rank: int, cfg: WaveConfig, q=None, meta_q=None, req_q=None) -> None
                     req.get("height"), req.get("width"),
                 )
                 is_warmup = bool(req.get("warmup"))
-                WaveDenoiser(backend, cfg, q=q, meta_q=meta_q).run(
-                    out_dir=req.get("out"), warmup=False, save=not is_warmup)
+                run_denoiser(out_dir=req.get("out"), warmup=False,
+                             save=not is_warmup)
     except Exception:
         import traceback
 

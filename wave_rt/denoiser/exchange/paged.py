@@ -81,8 +81,8 @@ class PagedExchangeMixin:
             gi = world_info[m]
             if gi["k_h"] is None:
                 continue
-            kb = p2p.ipc_open_handle(gi["k_h"])
-            vb = p2p.ipc_open_handle(gi["v_h"])
+            kb = self._ipc_open(gi["k_h"])
+            vb = self._ipc_open(gi["v_h"])
             od = self._os_dst[m]
             self._pg_dst[m] = dict(
                 k_slab=kb + gi["k_off"],
