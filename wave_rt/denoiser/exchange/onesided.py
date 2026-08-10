@@ -99,7 +99,7 @@ class OneSidedExchangeMixin:
         for m in my_dsts:
             gi = world_info[m]
             my_i = gi["src_index"][c]
-            fl_base = p2p.ipc_open_handle(gi["fl_h"])
+            fl_base = self._ipc_open(gi["fl_h"])
             if self._paged:
                 self._os_dst[m] = dict(
                     kv_slab=0,
@@ -110,7 +110,7 @@ class OneSidedExchangeMixin:
                     slot_bytes=gi["slot_bytes"],
                 )
             else:
-                kv_base = p2p.ipc_open_handle(gi["kv_h"])
+                kv_base = self._ipc_open(gi["kv_h"])
                 self._os_dst[m] = dict(
                     kv_slab=kv_base + gi["kv_off"],
                     fl_slab=fl_base + gi["fl_off"],

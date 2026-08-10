@@ -69,8 +69,8 @@ class RelayExchangeMixin:
         self._rl_down = None
         if down is not None:
             gi = world_info[down]
-            kv_base = p2p.ipc_open_handle(gi["kv_h"])
-            fl_base = p2p.ipc_open_handle(gi["fl_h"])
+            kv_base = self._ipc_open(gi["kv_h"])
+            fl_base = self._ipc_open(gi["fl_h"])
             self._rl_down = dict(
                 rank=down,
                 kv_slab=kv_base + gi["kv_off"],
