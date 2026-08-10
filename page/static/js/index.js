@@ -364,7 +364,7 @@
     if (cell.anomaly) classes.push('anomaly');
     const speedup = Number.isFinite(cell.speedup) ? ` · ${cell.speedup.toFixed(1)}×` : '';
     const warning = cell.anomaly ? `<b class="benchmark-anomaly">${cell.anomaly}</b>` : '';
-    return `<div class="${classes.join(' ')}"><strong>${cell.p50.toFixed(1)}</strong><small><em>${cell.fpsP50.toFixed(1)} FPS(p50)</em>${speedup}</small><small class="wall-fps">DiT ${cell.ditFps.toFixed(1)} · E2E ${cell.e2eFps.toFixed(1)}</small>${warning}</div>`;
+    return `<div class="${classes.join(' ')}"><strong class="e2e-hero">${cell.e2eFps.toFixed(1)}<em> E2E FPS</em></strong><small>${cell.p50.toFixed(1)} ms${speedup}</small><small class="wall-fps">DiT ${cell.ditFps.toFixed(1)} · FPS(p50) ${cell.fpsP50.toFixed(1)}</small>${warning}</div>`;
   }
 
   function renderBenchmark(key) {
@@ -375,7 +375,7 @@
     const bestE2e = Math.max(...available.map(cell => cell.e2eFps));
 
     $('#benchmarkTitle').textContent = `${data.scale} · ${data.topology}`;
-    $('#benchmarkBaseline').textContent = Number.isFinite(data.baseline) ? `${data.baseline.toFixed(3)} s · ${data.baselineFps.toFixed(1)} FPS` : 'Not recorded · dummy';
+    $('#benchmarkBaseline').textContent = Number.isFinite(data.baseline) ? `${benchmarkData.statistics.outputFrames} frames @ ${data.baselineFps.toFixed(1)} FPS` : 'Not recorded · dummy';
     const scope = Number.isFinite(data.baseline)
       ? `Pooled ${benchmarkData.statistics.steadyWindow} · ${benchmarkData.statistics.framesPerTick} frames/tick. DiT and E2E use ${benchmarkData.statistics.outputFrames} output frames; × uses the ${data.baseline.toFixed(3)} s baseline.`
       : `Pooled ${benchmarkData.statistics.steadyWindow} · shape-accurate ${data.weights}; DiT/E2E use ${benchmarkData.statistics.outputFrames} output frames. No 14B single-GPU baseline.`;
@@ -412,6 +412,57 @@
       benchmarkBody.innerHTML = '<tr><td colspan="6" class="benchmark-load-error">Benchmark summary could not be loaded.</td></tr>';
       console.error(error);
     });
+
+  const citationModal = $('#citationModal');
+  const citationText = $('#blogCitation');
+  const citationCopy = $('#copyCitation');
+  const citationStatus = $('#citationCopyStatus');
+  let citationReturnFocus = null;
+
+  function openCitation() {
+    citationReturnFocus = document.activeElement;
+    citationModal.hidden = false;
+    document.body.classList.add('cite-open');
+    citationModal.querySelector('.citation-close').focus();
+  }
+
+  function closeCitation() {
+    citationModal.hidden = true;
+    document.body.classList.remove('cite-open');
+    citationStatus.textContent = '';
+    if (citationReturnFocus) citationReturnFocus.focus();
+  }
+
+  document.querySelectorAll('[data-cite-open]').forEach(button => button.addEventListener('click', openCitation));
+  citationModal.querySelectorAll('[data-cite-close]').forEach(element => element.addEventListener('click', closeCitation));
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !citationModal.hidden) closeCitation();
+  });
+
+  citationCopy.addEventListener('click', async () => {
+    const bibtex = citationText.textContent.trim();
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(bibtex);
+      } else {
+        const helper = document.createElement('textarea');
+        helper.value = bibtex;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        helper.remove();
+      }
+      citationCopy.textContent = 'Copied';
+      citationStatus.textContent = 'BibTeX copied to clipboard.';
+      window.setTimeout(() => { citationCopy.textContent = 'Copy BibTeX'; }, 1600);
+    } catch (error) {
+      citationStatus.textContent = 'Copy failed — select the BibTeX above.';
+      console.error(error);
+    }
+  });
 
   const heroWave = $('#heroWave');
   for (let index = 0; index < 15; index += 1) {

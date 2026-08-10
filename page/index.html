@@ -3,22 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="title" content="Wave Your Streaming Video to Speed-of-Light">
+  <meta name="title" content="Wave Forcing: Towards Speed-of-Light Streaming Video Generation">
   <meta name="description" content="Wave Forcing keeps Rolling Forcing's live mixed-noise frontier, removes reverse inter-chunk edges, and turns the resulting directed graph into a GPU wavefront with overlapped KV transport.">
   <meta name="keywords" content="video generation, diffusion, rolling forcing, pipeline parallelism, wavefront, streaming inference">
   <meta name="author" content="MLSys Team, DENG Lab at Shanghai Jiao Tong University">
   <meta name="theme-color" content="#07111f">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="DENG Lab @ SJTU">
-  <meta property="og:title" content="Wave Your Streaming Video to Speed-of-Light">
+  <meta property="og:title" content="Wave Forcing: Towards Speed-of-Light Streaming Video Generation">
   <meta property="og:description" content="Wave Forcing × Wave Parallel for speed-of-light streaming video generation.">
-  <title>Wave Your Streaming Video to Speed-of-Light — DENG Lab @ SJTU</title>
+  <link rel="canonical" href="https://sjtu-deng-lab.github.io/WaveForcing/">
+  <title>Wave Forcing: Towards Speed-of-Light Streaming Video Generation — DENG Lab @ SJTU</title>
   <link rel="icon" type="image/svg+xml" href="static/images/wave-forcing-logo.svg">
   <link rel="alternate icon" type="image/x-icon" href="static/images/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="static/css/index.css">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "TechArticle",
+      "headline": "Wave Forcing: Towards Speed-of-Light Streaming Video Generation",
+      "author": {"@type": "Organization", "name": "DENG Lab MLSys Team"},
+      "publisher": {"@type": "Organization", "name": "Shanghai Jiao Tong University"},
+      "datePublished": "2026-08-09",
+      "url": "https://sjtu-deng-lab.github.io/WaveForcing/"
+    }
+  </script>
 </head>
 <body>
   <nav class="topbar" aria-label="Main navigation">
@@ -32,6 +44,7 @@
       <a href="#transport">Transport</a>
       <a href="#vae">VAE</a>
       <a href="#results">Results</a>
+      <a href="#quality">Quality</a>
       <a class="nav-code" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">Code ↗</a>
     </div>
   </nav>
@@ -58,10 +71,11 @@
         </div>
         <p class="eyebrow"><span class="live-dot"></span> Wave Forcing</p>
         <h1><span class="wave-word">Wave</span> Your<br>Streaming Video<span class="speed-line">to <em>Speed-of-Light.</em></span></h1>
-        <p class="hero-lede"><strong>Wave Forcing</strong> keeps Rolling Forcing's mixed-noise schedule, but makes cross-chunk attention block-causal. <strong>Wave Runtime</strong> executes this DAG through Wave Parallelism: full-model GPU replicas hide one-way KV communication and stream completed chunks through a balanced VAE pipeline.</p>
+        <p class="hero-lede"><strong>Wave Forcing</strong> keeps Rolling Forcing's mixed-noise schedule, but makes cross-chunk attention block-causal. <strong>Wave Runtime (WaveRT)</strong> — our custom execution engine on SGLang Diffusion's model-layer backend — executes this DAG through Wave Parallelism: full-model GPU replicas hide one-way KV communication and stream completed chunks through a balanced VAE pipeline.</p>
         <div class="hero-actions">
           <a class="button primary" href="#explorer">Run the pipeline</a>
           <a class="button secondary" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">View code <span>↗</span></a>
+          <button class="button cite-trigger" type="button" data-cite-open>Cite this blog</button>
         </div>
         <div class="hero-metrics" aria-label="Headline results">
           <div class="fps-metric e2e-metric"><strong>117.7 <i>E2E FPS</i></strong><span>≈13.56 s · full 1596-frame pipeline</span></div>
@@ -165,7 +179,21 @@
       <div class="section-head reveal">
         <p class="kicker">02 · Interactive pipeline</p>
         <h2>Two pipelines work at two different scales.</h2>
-        <p>Chunk–stage tasks form a wave across full-model GPU replicas. Inside every Transformer layer, one-way KV communication is prefetched and hidden under the longer attention computation of the critical consumer.</p>
+        <p>Chunk–stage tasks form a wave across full-model GPU replicas. Inside every Transformer layer, one-way KV communication is prefetched and hidden under the longer attention computation of the critical consumer. Two ideas make this wave possible — <strong>Wave Parallelism</strong>, the core mechanism, and <strong>Wave Runtime (WaveRT)</strong>, the engine that executes it.</p>
+      </div>
+
+      <div class="mechanism-defs reveal">
+        <article class="mechanism-card">
+          <p class="mech-kicker"><i></i>Core mechanism</p>
+          <h3>Wave Parallelism</h3>
+          <p>Wave Parallelism is Context Parallelism specialized into an async form by algorithm co-design. Block-causal attention lets each denoising step start on its own GPU rank the moment it is ready — ranks publish KV one-way instead of meeting at a layer-wise all-gather — so the wave advances one GPU–stage pair per tick.</p>
+          <p class="mech-status"><b>Today:</b> decoupled implementation <i>·</i> <b>Next:</b> fused form</p>
+        </article>
+        <article class="mechanism-card runtime-card">
+          <p class="mech-kicker"><i></i>The execution engine</p>
+          <h3>Wave Runtime (WaveRT)</h3>
+          <p>WaveRT is our custom execution engine, built on SGLang Diffusion's model-layer backend. It organizes warmup and steady-state runs, and integrates the Wave Parallel optimizations that follow on this page — FP8 KV, copy-engine one-sided writes, paged buffers, and the measured-time VAE split.</p>
+        </article>
       </div>
 
       <div class="overlap-story reveal">
@@ -250,7 +278,7 @@
       <div class="pipeline-intro reveal">
         <p class="micro-kicker">Across consecutive video chunks</p>
         <h3>Now zoom out: the whole wavefront.</h3>
-        <p>Read the schedule by GPU ID vertically and Stage ID horizontally. Follow one color diagonally to track the same chunk through diffusion, context publication, and VAE decode.</p>
+        <p>Read the schedule by GPU ID vertically and Stage ID horizontally. Follow one color diagonally to track the same chunk through diffusion, context publication, and VAE decode — that diagonal is <strong>Wave Parallelism</strong> advancing one GPU–stage pair per tick.</p>
       </div>
 
       <div class="pipeline-shell reveal">
@@ -458,7 +486,7 @@
             <button data-benchmark="1.3b-5+2" role="tab">1.3B · 5+2</button>
             <button data-benchmark="14b-4+3" role="tab">14B · 4+3</button>
           </div>
-          <div class="benchmark-legend"><i></i> Each cell: steady p50 · DiT FPS · E2E FPS <b>orange = VAE contention</b></div>
+          <div class="benchmark-legend"><i></i> Each cell: E2E FPS · tick p50 · DiT FPS <b>orange = VAE contention</b></div>
         </div>
         <div class="benchmark-meta">
           <div><span>Model / topology</span><strong id="benchmarkTitle">1.3B · 4+3</strong></div>
@@ -474,14 +502,279 @@
         </div>
         <div class="benchmark-foot"><span id="benchmarkFoot">Steady FPS(p50) uses 12 output frames per tick. DiT/E2E FPS use 1596 frames over their respective wall clocks.</span><b>Relay excluded: 14 recorded timeouts · rerun pending</b></div>
       </div>
+      <div class="five-two-explainer reveal">
+        <div class="five-two-copy">
+          <span>Why 5+2 plateaus</span>
+          <h3>Five fast DiT ranks feed only two coarse VAE stages.</h3>
+          <p>The diffusion side can exceed 120 FPS, but a two-way VAE split leaves too much decoder work in each stage. Its longest stage runs past the next chunk's arrival, so decode cannot be fully hidden behind generation.</p>
+          <div class="five-two-numbers"><div><strong>120+</strong><small>DiT FPS available</small></div><i>→</i><div><strong>85.1</strong><small>best reliable E2E FPS</small></div></div>
+        </div>
+        <div class="cadence-comparison" aria-label="Comparison between fast DiT arrivals and a coarse two-stage VAE">
+          <div class="cadence-heading"><span>Chunk cadence</span><b>Exposed decoder tail</b></div>
+          <div class="cadence-row arrival-row"><label>DiT arrivals</label><div class="cadence-track"><i>Cₙ</i><i>Cₙ₊₁</i><i>Cₙ₊₂</i><i>Cₙ₊₃</i></div></div>
+          <div class="cadence-row decode-row"><label>2-stage VAE</label><div class="cadence-track"><i>VAE A</i><i>VAE B</i><b>not hidden</b></div></div>
+          <p><i></i>When the next chunk enters before the previous decode finishes, adjacent chunks contend on the same two VAE GPUs. SM competition stretches both jobs instead of increasing throughput.</p>
+          <div class="split-remedy"><span>4+3 remedy</span><b>Three smaller, time-balanced VAE stages approach the DiT cadence and leave only a small residual barrier.</b></div>
+        </div>
+      </div>
       <div class="caveat reveal"><span>Source & scope</span><p>Final 178-record report: 164 successful runs and 14 recorded relay timeouts. <strong>FPS(p50)</strong> is steady tick throughput; <strong>DiT FPS</strong> includes diffusion fill/drain; <strong>E2E FPS</strong> also includes VAE. The 14B sweep uses random-init dummy weights. In 5+2, the two-stage VAE sets a structural ceiling near 85 E2E FPS; orange Sage/SageFP8 async cells show an additional resource-contention slowdown despite healthy DiT throughput.</p></div>
+    </section>
+
+    <section class="section quality-section" id="quality">
+      <div class="section-head reveal">
+        <p class="kicker">06 · VBench quality</p>
+        <h2>Acceleration doesn't trade<br>away quality.</h2>
+        <p>50 aligned MovieGen prompts, one 213-second video per arm, evaluated with VBench-Long. Wave Forcing holds Rolling Forcing's flickering and motion smoothness while lifting subject and background consistency — with quality drift an order of magnitude lower.</p>
+        <a class="related-work-link" href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview" target="_blank" rel="noopener">
+          <span>Preview · the only checkpoint released so far</span>
+          <strong>WaveForcing-T2V-1.3B-5step</strong>
+          <i aria-hidden="true">↗</i>
+        </a>
+      </div>
+
+      <div class="protocol-strip reveal">
+        <div><span>Arm 1 · Rolling Forcing</span><b>Full checkpoint · full attention</b></div>
+        <div><span>Arm 2 · Rolling Forcing · causal</span><b>Same checkpoint · strict block-causal</b></div>
+        <div class="wave"><span>Arm 3 · Wave Forcing</span><b>Wave Forcing Preview</b></div>
+      </div>
+
+      <div class="benchmark-panel quality-panel reveal">
+        <div class="benchmark-toolbar">
+          <span class="quality-tab"><i></i>VBench-Long · 5-step · 213.4 s clips</span>
+          <div class="benchmark-legend"><i></i>green = best per row <b>Quality Drift ↓ · lower is better</b></div>
+        </div>
+        <div class="benchmark-meta">
+          <div><span>Prompts</span><strong>50 MovieGen</strong></div>
+          <div><span>Seed / samples</span><strong>42 · 1 video per arm</strong></div>
+          <div><span>Native 5-step schedule</span><strong>[1000, 800, 600, 400, 200]</strong></div>
+          <div><span>Output</span><strong>3201 frames @ 15 FPS</strong></div>
+        </div>
+        <div class="benchmark-table-wrap">
+          <table class="benchmark-table quality-table">
+            <thead>
+              <tr><th>Metric</th><th>Rolling Forcing</th><th>Rolling Forcing · causal</th><th class="wave-col">Wave Forcing</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b class="quality-metric">Temporal Flickering</b></td>
+                <td><div class="quality-cell best">0.976686</div></td>
+                <td><div class="quality-cell">0.970226</div></td>
+                <td class="wave-col"><div class="quality-cell">0.976579</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Subject Consistency</b></td>
+                <td><div class="quality-cell">0.971557</div></td>
+                <td><div class="quality-cell">0.966446</div></td>
+                <td class="wave-col"><div class="quality-cell best">0.980122</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Background Consistency</b></td>
+                <td><div class="quality-cell">0.961879</div></td>
+                <td><div class="quality-cell">0.958950</div></td>
+                <td class="wave-col"><div class="quality-cell best">0.966289</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Motion Smoothness</b></td>
+                <td><div class="quality-cell best">0.987435</div></td>
+                <td><div class="quality-cell">0.983091</div></td>
+                <td class="wave-col"><div class="quality-cell">0.984803</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Aesthetic Quality</b></td>
+                <td><div class="quality-cell best">0.532904</div></td>
+                <td><div class="quality-cell">0.528120</div></td>
+                <td class="wave-col"><div class="quality-cell">0.530068</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Imaging Quality</b></td>
+                <td><div class="quality-cell">0.707718</div></td>
+                <td><div class="quality-cell">0.673502</div></td>
+                <td class="wave-col"><div class="quality-cell best">0.711773</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Quality Drift</b></td>
+                <td><div class="quality-cell">0.01525</div></td>
+                <td><div class="quality-cell">0.02915</div></td>
+                <td class="wave-col"><div class="quality-cell best drift">0.00016</div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="benchmark-foot"><span>Strict block-causal inference alone drops flickering and motion smoothness; Wave Forcing recovers them while decoding concurrently.</span><b>* VBench-Long protocol — some scores differ from the Rolling Forcing paper (e.g. Aesthetic Quality).</b></div>
+      </div>
+
+      <div class="benchmark-panel quality-panel reveal">
+        <div class="benchmark-toolbar">
+          <span class="quality-tab"><i></i>VBench-Long · 4-step · forced inference</span>
+          <div class="benchmark-legend"><i></i>green = best per row <b>Wave Forcing 4-step · in training</b></div>
+        </div>
+        <div class="benchmark-meta">
+          <div><span>Arms 1–3</span><strong>5-step ckpts · forced 4-step</strong></div>
+          <div><span>Causal Forcing (Long)</span><strong>Long-video generation</strong></div>
+          <div><span>Wave Forcing 4-step</span><strong>In training</strong></div>
+          <div><span>Output</span><strong>3201 frames @ 15 FPS</strong></div>
+        </div>
+        <div class="benchmark-table-wrap">
+          <table class="benchmark-table quality-table">
+            <thead>
+              <tr><th>Metric</th><th>Rolling Forcing<small>5-step ckpt · forced 4-step</small></th><th>Rolling Forcing · causal<small>5-step ckpt · forced 4-step</small></th><th>Wave Forcing<small>5-step ckpt · forced 4-step</small></th><th>Causal Forcing (Long)<small>long-video generation</small></th><th class="wave-col">Wave Forcing 4-step<small>in training</small></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b class="quality-metric">Temporal Flickering</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="pending-col" rowspan="7"><div class="quality-pending"><b>Stay tuned</b><small>Wave Forcing 4-step · results will be posted here</small></div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Subject Consistency</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Background Consistency</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Motion Smoothness</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Aesthetic Quality</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Imaging Quality</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Quality Drift</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="benchmark-foot"><span>Same three 5-step checkpoints forced to a 4-step schedule; Causal Forcing (Long) runs long-video causal forcing with no streaming pipeline.</span><b>* Results pending — posted as soon as the sweep completes.</b></div>
+      </div>
+
+      <div class="benchmark-panel quality-panel reveal">
+        <div class="benchmark-toolbar">
+          <span class="quality-tab"><i></i>VBench-Long · algorithm × runtime</span>
+          <div class="benchmark-legend"><i></i>green = best per row <b>FPS · higher is better</b></div>
+        </div>
+        <div class="benchmark-meta">
+          <div><span>Algorithms</span><strong>HiAR · Wave Forcing</strong></div>
+          <div><span>Runtimes</span><strong>WaveRT · HiAR</strong></div>
+          <div><span>Schedule</span><strong>Native</strong></div>
+          <div><span>Output</span><strong>3201 frames @ 15 FPS</strong></div>
+        </div>
+        <div class="benchmark-table-wrap">
+          <table class="benchmark-table quality-table">
+            <thead>
+              <tr><th>Metric</th><th>HiAR on WaveRT</th><th>HiAR on HiAR</th><th class="wave-col">Wave Forcing on WaveRT</th><th class="wave-col">Wave Forcing on HiAR</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b class="quality-metric">Temporal Flickering</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Subject Consistency</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Background Consistency</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Motion Smoothness</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Aesthetic Quality</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Imaging Quality</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">Quality Drift</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">FPS</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="benchmark-foot"><span>Same VBench-Long protocol with an added FPS row for per-arm throughput.</span><b>* Results pending — posted as soon as the sweep completes.</b></div>
+      </div>
+
+      <div class="speed-explainer reveal">
+        <div>
+          <p class="speed-kicker">Why HiAR is faster</p>
+          <h3>Speed follows the wall — and HiAR's walls are cheaper.</h3>
+        </div>
+        <ol>
+          <li><b>No KV-return traffic.</b> HiAR never ships context back toward earlier stages, so its critical path carries no KV-return communication wall.</li>
+          <li><b>A shorter running window.</b> With less context to keep in flight, its bound wall sits lower and each tick does less work — a faster cadence follows naturally.</li>
+        </ol>
+        <p class="speed-note">A higher FPS on a looser pipeline is the expected outcome, not a result to match; the comparison is about what each design trades away to get there.</p>
+      </div>
+
+      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the 50 aligned MovieGen prompts (seed 42, native 5-step schedule <code>[1000, 800, 600, 400, 200]</code>, one 3201-frame video per arm at 15 FPS / 213.4 s). The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long). <strong>Quality Drift is lower-is-better;</strong> every other metric is higher-is-better. Wave Forcing is a preview under strict block-causal inference; the released checkpoint is <a href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview" target="_blank" rel="noopener">WaveForcing-T2V-1.3B-5step</a>, and Wave Forcing 4-step is still in training.</p></div>
     </section>
 
     <section class="closing">
       <div class="closing-wave" aria-hidden="true"></div>
       <p class="kicker">Wave Forcing × Wave Parallel</p>
       <h2>Wave Your Streaming Video<br><em>to Speed-of-Light.</em></h2>
-      <div class="closing-links"><a class="button primary" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">Explore the code ↗</a><span>Paper & models coming soon</span></div>
+      <div class="closing-links"><a class="button primary" href="https://github.com/SJTU-DENG-Lab/Wave-Forcing" target="_blank" rel="noopener">Explore the code ↗</a><button class="button closing-cite" type="button" data-cite-open>Cite this blog</button><span>arXiv &amp; models coming soon</span></div>
     </section>
   </main>
 
@@ -490,6 +783,29 @@
     <p>MLSys Team · DENG Lab · Shanghai Jiao Tong University</p>
     <a href="https://SJTU-DENG-Lab.github.io/" target="_blank" rel="noopener">DENG Lab ↗</a>
   </footer>
+  <div class="citation-modal" id="citationModal" hidden>
+    <div class="citation-backdrop" data-cite-close></div>
+    <section class="citation-dialog" role="dialog" aria-modal="true" aria-labelledby="citationTitle" aria-describedby="citationDescription">
+      <button class="citation-close" type="button" data-cite-close aria-label="Close citation dialog">×</button>
+      <p class="citation-kicker">Blog citation · arXiv pending</p>
+      <h2 id="citationTitle">Cite Wave Forcing</h2>
+      <p id="citationDescription">Our arXiv entry is not public yet. For now, please cite this project blog; the citation will be updated when the paper is released.</p>
+      <div class="citation-code-head"><span>BibTeX</span><b>Canonical project page</b></div>
+      <pre><code id="blogCitation">@misc{denglab2026waveforcing,
+  title        = {Wave Forcing: Towards Speed-of-Light Streaming Video Generation},
+  author       = {{DENG Lab MLSys Team}},
+  year         = {2026},
+  howpublished = {Project blog},
+  organization = {Shanghai Jiao Tong University},
+  url          = {https://sjtu-deng-lab.github.io/WaveForcing/}
+}</code></pre>
+      <div class="citation-actions">
+        <button class="button citation-copy" id="copyCitation" type="button">Copy BibTeX</button>
+        <a href="https://sjtu-deng-lab.github.io/WaveForcing/" target="_blank" rel="noopener">Open canonical page ↗</a>
+      </div>
+      <p class="citation-copy-status" id="citationCopyStatus" aria-live="polite"></p>
+    </section>
+  </div>
   <script src="static/js/index.js"></script>
 </body>
 </html>
