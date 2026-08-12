@@ -16,8 +16,8 @@
 
     <!-- F · parallel arms with forcing tips -->
     <rect x="63" y="17" width="8" height="7" fill="#8b7cff"/>
-    <path d="M71 17H75L72 24H71Z" fill="#c8ff58"/>
+    <path d="M71 17H75L72 24H71Z" fill="#8b7cff"/>
     <rect x="58" y="30" width="7" height="7" fill="#8b7cff"/>
-    <path d="M65 30H69L66 37H65Z" fill="#c8ff58"/>
+    <path d="M65 30H69L66 37H65Z" fill="#8b7cff"/>
   </g>
 </svg>
