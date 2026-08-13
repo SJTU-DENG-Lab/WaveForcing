@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="static/css/index.css">
+  <link rel="stylesheet" href="static/css/index.css?v=20260813d">
   <link rel="stylesheet" href="static/css/generation-demo.css">
   <script type="application/ld+json">
     {
@@ -589,7 +589,7 @@
       <div class="section-head reveal">
         <p class="kicker">06 · VBench quality</p>
         <h2>Acceleration doesn't trade<br>away quality.</h2>
-        <p>50 aligned MovieGen prompts, one 200-second video per arm, evaluated with VBench-Long. Wave Forcing holds Rolling Forcing's flickering and motion smoothness while lifting subject and background consistency — with quality drift an order of magnitude lower.</p>
+        <p>On VBench-Long with ~100-second videos, Wave Forcing delivers quality on par with Rolling Forcing.</p>
         <a class="related-work-link" href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview" target="_blank" rel="noopener">
           <span>Preview · the only checkpoint released so far</span>
           <strong>WaveForcing-T2V-1.3B-5step</strong>
@@ -597,227 +597,168 @@
         </a>
       </div>
 
-      <div class="protocol-strip reveal">
-        <div><span>Arm 1 · Rolling Forcing</span><b>Full checkpoint · full attention</b></div>
-        <div><span>Arm 2 · Rolling Forcing · causal</span><b>Same checkpoint · strict block-causal</b></div>
-        <div class="wave"><span>Arm 3 · Wave Forcing</span><b>Wave Forcing Preview</b></div>
-      </div>
-
       <div class="benchmark-panel quality-panel reveal">
         <div class="benchmark-toolbar">
-          <span class="quality-tab"><i></i>VBench-Long · 5-step · 200 s clips</span>
-          <div class="benchmark-legend"><i></i>green = best per row <b>Quality Drift ↓ · lower is better</b></div>
-        </div>
-        <div class="benchmark-meta">
-          <div><span>Prompts</span><strong>50 MovieGen</strong></div>
-          <div><span>Seed / samples</span><strong>42 · 1 video per arm</strong></div>
-          <div><span>Native 5-step schedule</span><strong>[1000, 800, 600, 400, 200]</strong></div>
-          <div><span>Output</span><strong>3201 frames @ 15 FPS</strong></div>
+          <span class="quality-tab"><i></i>VBench-Long · 5-step · 100 s clips</span>
         </div>
         <div class="benchmark-table-wrap">
           <table class="benchmark-table quality-table">
             <thead>
-              <tr><th>Metric</th><th>Rolling Forcing</th><th>Rolling Forcing · causal</th><th class="wave-col">Wave Forcing</th></tr>
+              <tr><th>Model</th><th>Temporal Flickering</th><th>Subject Consistency</th><th>Background Consistency</th><th>Motion Smoothness</th><th>Aesthetic Quality</th><th>Imaging Quality</th><th>Quality Drift&nbsp;↓</th></tr>
             </thead>
             <tbody>
               <tr>
-                <td><b class="quality-metric">Temporal Flickering</b></td>
-                <td><div class="quality-cell best">0.976686</div></td>
-                <td><div class="quality-cell">0.970226</div></td>
-                <td class="wave-col"><div class="quality-cell">0.976579</div></td>
+                <td><b class="quality-metric">Rolling Forcing</b></td>
+                <td><div class="quality-cell best">97.81</div></td>
+                <td><div class="quality-cell">97.34</div></td>
+                <td><div class="quality-cell">96.42</div></td>
+                <td><div class="quality-cell best">98.85</div></td>
+                <td><div class="quality-cell">53.83</div></td>
+                <td><div class="quality-cell">69.58</div></td>
+                <td><div class="quality-cell">0.618</div></td>
               </tr>
               <tr>
-                <td><b class="quality-metric">Subject Consistency</b></td>
-                <td><div class="quality-cell">0.971557</div></td>
-                <td><div class="quality-cell">0.966446</div></td>
-                <td class="wave-col"><div class="quality-cell best">0.980122</div></td>
+                <td><b class="quality-metric">Rolling Forcing on WaveRT</b></td>
+                <td><div class="quality-cell">97.24</div></td>
+                <td><div class="quality-cell">96.82</div></td>
+                <td><div class="quality-cell">96.14</div></td>
+                <td><div class="quality-cell">98.39</div></td>
+                <td><div class="quality-cell best">55.18</div></td>
+                <td><div class="quality-cell">66.82</div></td>
+                <td><div class="quality-cell">2.825</div></td>
               </tr>
               <tr>
-                <td><b class="quality-metric">Background Consistency</b></td>
-                <td><div class="quality-cell">0.961879</div></td>
-                <td><div class="quality-cell">0.958950</div></td>
-                <td class="wave-col"><div class="quality-cell best">0.966289</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Motion Smoothness</b></td>
-                <td><div class="quality-cell best">0.987435</div></td>
-                <td><div class="quality-cell">0.983091</div></td>
-                <td class="wave-col"><div class="quality-cell">0.984803</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Aesthetic Quality</b></td>
-                <td><div class="quality-cell best">0.532904</div></td>
-                <td><div class="quality-cell">0.528120</div></td>
-                <td class="wave-col"><div class="quality-cell">0.530068</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Imaging Quality</b></td>
-                <td><div class="quality-cell">0.707718</div></td>
-                <td><div class="quality-cell">0.673502</div></td>
-                <td class="wave-col"><div class="quality-cell best">0.711773</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Quality Drift</b></td>
-                <td><div class="quality-cell">0.01525</div></td>
-                <td><div class="quality-cell">0.02915</div></td>
-                <td class="wave-col"><div class="quality-cell best drift">0.00016</div></td>
+                <td class="wave-col"><b class="quality-metric">Wave Forcing</b></td>
+                <td class="wave-col"><div class="quality-cell">97.86</div></td>
+                <td class="wave-col"><div class="quality-cell best">98.00</div></td>
+                <td class="wave-col"><div class="quality-cell best">96.79</div></td>
+                <td class="wave-col"><div class="quality-cell">98.57</div></td>
+                <td class="wave-col"><div class="quality-cell">54.93</div></td>
+                <td class="wave-col"><div class="quality-cell best">69.66</div></td>
+                <td class="wave-col"><div class="quality-cell best drift">0.030</div></td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div class="benchmark-foot"><span>Strict block-causal inference alone drops flickering and motion smoothness; Wave Forcing recovers them while decoding concurrently.</span><b>* VBench-Long protocol — some scores differ from the Rolling Forcing paper (e.g. Aesthetic Quality).</b></div>
       </div>
 
       <div class="benchmark-panel quality-panel reveal">
         <div class="benchmark-toolbar">
           <span class="quality-tab"><i></i>VBench-Long · 4-step · forced inference</span>
-          <div class="benchmark-legend"><i></i>green = best per row <b>Wave Forcing 4-step · in training</b></div>
-        </div>
-        <div class="benchmark-meta">
-          <div><span>Arms 1–3</span><strong>5-step ckpts · forced 4-step</strong></div>
-          <div><span>Causal Forcing (Long)</span><strong>Long-video generation</strong></div>
-          <div><span>Wave Forcing 4-step</span><strong>In training</strong></div>
-          <div><span>Output</span><strong>3201 frames @ 15 FPS</strong></div>
         </div>
         <div class="benchmark-table-wrap">
           <table class="benchmark-table quality-table">
             <thead>
-              <tr><th>Metric</th><th>Rolling Forcing<small>5-step ckpt · forced 4-step</small></th><th>Rolling Forcing · causal<small>5-step ckpt · forced 4-step</small></th><th>Wave Forcing<small>5-step ckpt · forced 4-step</small></th><th>Causal Forcing (Long)<small>long-video generation</small></th><th class="wave-col">Wave Forcing 4-step<small>in training</small></th></tr>
+              <tr><th>Model</th><th>Temporal Flickering</th><th>Subject Consistency</th><th>Background Consistency</th><th>Motion Smoothness</th><th>Aesthetic Quality</th><th>Imaging Quality</th><th>Quality Drift&nbsp;↓</th></tr>
             </thead>
             <tbody>
               <tr>
-                <td><b class="quality-metric">Temporal Flickering</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td class="pending-col" rowspan="7"><div class="quality-pending"><b>Stay tuned</b><small>Wave Forcing 4-step · results will be posted here</small></div></td>
+                <td><b class="quality-metric">Rolling Forcing<sup>*</sup></b></td>
+                <td><div class="quality-cell best">97.78</div></td>
+                <td><div class="quality-cell">97.20</div></td>
+                <td><div class="quality-cell">96.23</div></td>
+                <td><div class="quality-cell best">98.84</div></td>
+                <td><div class="quality-cell">53.62</div></td>
+                <td><div class="quality-cell best">69.62</div></td>
+                <td><div class="quality-cell best">1.111</div></td>
               </tr>
               <tr>
-                <td><b class="quality-metric">Subject Consistency</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
+                <td><b class="quality-metric">Rolling Forcing on WaveRT<sup>*</sup></b></td>
+                <td><div class="quality-cell">97.36</div></td>
+                <td><div class="quality-cell">96.69</div></td>
+                <td><div class="quality-cell">96.11</div></td>
+                <td><div class="quality-cell">98.50</div></td>
+                <td><div class="quality-cell best">54.52</div></td>
+                <td><div class="quality-cell">66.32</div></td>
+                <td><div class="quality-cell">2.680</div></td>
               </tr>
               <tr>
-                <td><b class="quality-metric">Background Consistency</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><b class="quality-metric">Wave Forcing<sup>*</sup></b></td>
+                <td class="wave-col"><div class="quality-cell">97.55</div></td>
+                <td class="wave-col"><div class="quality-cell best">97.66</div></td>
+                <td class="wave-col"><div class="quality-cell best">96.69</div></td>
+                <td class="wave-col"><div class="quality-cell">98.28</div></td>
+                <td class="wave-col"><div class="quality-cell">54.31</div></td>
+                <td class="wave-col"><div class="quality-cell">68.89</div></td>
+                <td class="wave-col"><div class="quality-cell">2.761</div></td>
               </tr>
               <tr>
-                <td><b class="quality-metric">Motion Smoothness</b></td>
+                <td><b class="quality-metric">Causal Forcing (Long)</b></td>
                 <td><div class="quality-cell na">—</div></td>
                 <td><div class="quality-cell na">—</div></td>
                 <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Aesthetic Quality</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Imaging Quality</b></td>
                 <td><div class="quality-cell na">—</div></td>
                 <td><div class="quality-cell na">—</div></td>
                 <td><div class="quality-cell na">—</div></td>
                 <td><div class="quality-cell na">—</div></td>
               </tr>
               <tr>
-                <td><b class="quality-metric">Quality Drift</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><b class="quality-metric">Wave Forcing 4-step</b></td>
+                <td class="pending-col" colspan="7"><div class="quality-pending"><b>Stay tuned</b><small>Wave Forcing 4-step · results will be posted here</small></div></td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div class="benchmark-foot"><span>Same three 5-step checkpoints forced to a 4-step schedule; Causal Forcing (Long) runs long-video causal forcing with no streaming pipeline.</span><b>* Results pending — posted as soon as the sweep completes.</b></div>
+        <div class="benchmark-foot"><b>* 5-step-trained checkpoints, evaluated here with forced 4-step inference.</b></div>
       </div>
 
       <div class="benchmark-panel quality-panel reveal">
         <div class="benchmark-toolbar">
           <span class="quality-tab"><i></i>VBench-Long · algorithm × runtime</span>
-          <div class="benchmark-legend"><i></i>green = best per row <b>FPS · higher is better</b></div>
-        </div>
-        <div class="benchmark-meta">
-          <div><span>Algorithms</span><strong>HiAR · Wave Forcing</strong></div>
-          <div><span>Runtimes</span><strong>WaveRT · HiAR</strong></div>
-          <div><span>Schedule</span><strong>Native</strong></div>
-          <div><span>Output</span><strong>3201 frames @ 15 FPS</strong></div>
         </div>
         <div class="benchmark-table-wrap">
           <table class="benchmark-table quality-table">
             <thead>
-              <tr><th>Metric</th><th>HiAR on WaveRT</th><th>HiAR on HiAR</th><th class="wave-col">Wave Forcing on WaveRT</th><th class="wave-col">Wave Forcing on HiAR</th></tr>
+              <tr><th>Model</th><th>Temporal Flickering</th><th>Subject Consistency</th><th>Background Consistency</th><th>Motion Smoothness</th><th>Aesthetic Quality</th><th>Imaging Quality</th><th>Quality Drift&nbsp;↓</th><th>FPS&nbsp;↑</th></tr>
             </thead>
             <tbody>
               <tr>
-                <td><b class="quality-metric">Temporal Flickering</b></td>
+                <td><b class="quality-metric">HiAR on WaveRT</b></td>
                 <td><div class="quality-cell na">—</div></td>
                 <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td><b class="quality-metric">HiAR on HiAR</b></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell na">—</div></td>
+              </tr>
+              <tr>
+                <td class="wave-col"><b class="quality-metric">Wave Forcing on WaveRT</b></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
               </tr>
               <tr>
-                <td><b class="quality-metric">Subject Consistency</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
+                <td class="wave-col"><b class="quality-metric">Wave Forcing on HiAR</b></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Background Consistency</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Motion Smoothness</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Aesthetic Quality</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Imaging Quality</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">Quality Drift</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">FPS</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
                 <td class="wave-col"><div class="quality-cell na">—</div></td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div class="benchmark-foot"><span>Same VBench-Long protocol with an added FPS row for per-arm throughput.</span><b>* Results pending — posted as soon as the sweep completes.</b></div>
       </div>
 
       <div class="speed-explainer reveal">
@@ -832,7 +773,7 @@
         <p class="speed-note">A higher FPS on a looser pipeline is the expected outcome, not a result to match; the comparison is about what each design trades away to get there.</p>
       </div>
 
-      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the 50 aligned MovieGen prompts (seed 42, native 5-step schedule <code>[1000, 800, 600, 400, 200]</code>, one 3201-frame video per arm at 15 FPS / 200.06 s). The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long). <strong>Quality Drift is lower-is-better;</strong> every other metric is higher-is-better. Wave Forcing is a preview under strict block-causal inference; the released checkpoint is <a href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview" target="_blank" rel="noopener">WaveForcing-T2V-1.3B-5step</a>, and Wave Forcing 4-step is still in training.</p></div>
+      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the same 50 MovieGen prompts, one 1593-frame video per prompt at 16 FPS / 99.56 s. Rolling Forcing on WaveRT is the same Rolling Forcing checkpoint decoded with Wave Forcing's block-causal inference. The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long); Causal Forcing (Long) and Wave Forcing 4-step results are pending and will be posted as the sweep completes; the algorithm × runtime sweep is likewise pending. Quality Drift is computed following the Rolling Forcing paper, lower-is-better; every other metric is a VBench-Long percentage, higher-is-better.</p></div>
     </section>
 
     <section class="closing">
