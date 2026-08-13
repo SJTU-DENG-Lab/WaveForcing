@@ -20,6 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="static/css/index.css">
+  <link rel="stylesheet" href="static/css/generation-demo.css">
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -39,6 +40,7 @@
       <span>Wave Forcing</span>
     </a>
     <div class="nav-links">
+      <a href="#demo">Demo</a>
       <a href="#idea">Idea</a>
       <a href="#explorer">Explorer</a>
       <a href="#transport">Transport</a>
@@ -95,6 +97,69 @@
         <div class="hero-badge badge-b"><span>Decode</span><b>3-stage VAE</b></div>
       </div>
       <a href="#idea" class="scroll-cue" aria-label="Scroll to the idea"><span></span>Explore</a>
+    </section>
+
+    <section class="generation-demo" id="demo" data-generation-demo>
+      <div class="generation-demo-head reveal">
+        <div>
+          <p class="kicker">Live generation comparison</p>
+          <h2>One video—or eight arriving in waves.</h2>
+        </div>
+        <div class="generation-demo-copy">
+          <p>A 99.6-second sample takes <strong>134.0 s</strong> with Rolling Forcing and about <strong>19.0 s</strong> per sample with Wave Forcing. Completed samples begin playing while the next one is generated.</p>
+          <p class="generation-demo-note">Noise-to-first-frame transitions are an illustrative visualization; completion times follow measured core inference latency. Click any completed sample to pause, continue, or replay it.</p>
+        </div>
+      </div>
+
+      <div class="generation-demo-controls reveal" aria-label="Generation demo controls">
+        <button class="demo-replay" type="button" data-demo-replay><span aria-hidden="true">↻</span> Replay sequence</button>
+        <div class="demo-speed" role="group" aria-label="Timeline speed">
+          <span>Timeline</span>
+          <button type="button" data-demo-speed="1">1× wall clock</button>
+          <button class="active" type="button" data-demo-speed="4">4× preview</button>
+        </div>
+      </div>
+
+      <div class="generation-demo-stage reveal">
+        <article class="demo-lane demo-rolling">
+          <h3>Rolling Forcing</h3>
+          <button class="demo-card demo-card-baseline" type="button" data-demo-card data-arm="rolling" data-generation="134.027" data-seed="41" aria-label="Rolling Forcing p41 sample; available after generation">
+            <video muted playsinline preload="metadata" poster="static/images/demo/rf-p41.jpg" src="static/videos/demo/rf-p41.mp4" tabindex="-1"></video>
+            <canvas aria-hidden="true"></canvas>
+            <span class="demo-card-control" aria-hidden="true"></span>
+          </button>
+        </article>
+
+        <article class="demo-lane demo-wave">
+          <h3>Wave Forcing</h3>
+          <div class="demo-wave-grid">
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="19.019" data-seed="48" aria-label="Wave Forcing p48 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p48.jpg" src="static/videos/demo/wf-p48.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="18.988" data-seed="28" aria-label="Wave Forcing p28 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p28.jpg" src="static/videos/demo/wf-p28.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="19.008" data-seed="20" aria-label="Wave Forcing p20 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p20.jpg" src="static/videos/demo/wf-p20.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="19.007" data-seed="18" aria-label="Wave Forcing p18 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p18.jpg" src="static/videos/demo/wf-p18.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="19.386" data-seed="14" aria-label="Wave Forcing p14 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p14.jpg" src="static/videos/demo/wf-p14.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="19.001" data-seed="10" aria-label="Wave Forcing p10 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p10.jpg" src="static/videos/demo/wf-p10.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="18.995" data-seed="46" aria-label="Wave Forcing p46 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p46.jpg" src="static/videos/demo/wf-p46.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <button class="demo-card" type="button" data-demo-card data-arm="wave" data-generation="19.027" data-seed="41" aria-label="Wave Forcing p41 sample; available after generation">
+              <video muted playsinline preload="metadata" poster="static/images/demo/wf-p41.jpg" src="static/videos/demo/wf-p41.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+          </div>
+        </article>
+      </div>
     </section>
 
     <section class="section light" id="idea">
@@ -524,7 +589,7 @@
       <div class="section-head reveal">
         <p class="kicker">06 · VBench quality</p>
         <h2>Acceleration doesn't trade<br>away quality.</h2>
-        <p>50 aligned MovieGen prompts, one 213-second video per arm, evaluated with VBench-Long. Wave Forcing holds Rolling Forcing's flickering and motion smoothness while lifting subject and background consistency — with quality drift an order of magnitude lower.</p>
+        <p>50 aligned MovieGen prompts, one 200-second video per arm, evaluated with VBench-Long. Wave Forcing holds Rolling Forcing's flickering and motion smoothness while lifting subject and background consistency — with quality drift an order of magnitude lower.</p>
         <a class="related-work-link" href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview" target="_blank" rel="noopener">
           <span>Preview · the only checkpoint released so far</span>
           <strong>WaveForcing-T2V-1.3B-5step</strong>
@@ -540,7 +605,7 @@
 
       <div class="benchmark-panel quality-panel reveal">
         <div class="benchmark-toolbar">
-          <span class="quality-tab"><i></i>VBench-Long · 5-step · 213.4 s clips</span>
+          <span class="quality-tab"><i></i>VBench-Long · 5-step · 200 s clips</span>
           <div class="benchmark-legend"><i></i>green = best per row <b>Quality Drift ↓ · lower is better</b></div>
         </div>
         <div class="benchmark-meta">
@@ -767,7 +832,7 @@
         <p class="speed-note">A higher FPS on a looser pipeline is the expected outcome, not a result to match; the comparison is about what each design trades away to get there.</p>
       </div>
 
-      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the 50 aligned MovieGen prompts (seed 42, native 5-step schedule <code>[1000, 800, 600, 400, 200]</code>, one 3201-frame video per arm at 15 FPS / 213.4 s). The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long). <strong>Quality Drift is lower-is-better;</strong> every other metric is higher-is-better. Wave Forcing is a preview under strict block-causal inference; the released checkpoint is <a href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview" target="_blank" rel="noopener">WaveForcing-T2V-1.3B-5step</a>, and Wave Forcing 4-step is still in training.</p></div>
+      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the 50 aligned MovieGen prompts (seed 42, native 5-step schedule <code>[1000, 800, 600, 400, 200]</code>, one 3201-frame video per arm at 15 FPS / 200.06 s). The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long). <strong>Quality Drift is lower-is-better;</strong> every other metric is higher-is-better. Wave Forcing is a preview under strict block-causal inference; the released checkpoint is <a href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview" target="_blank" rel="noopener">WaveForcing-T2V-1.3B-5step</a>, and Wave Forcing 4-step is still in training.</p></div>
     </section>
 
     <section class="closing">
@@ -807,5 +872,6 @@
     </section>
   </div>
   <script src="static/js/index.js"></script>
+  <script src="static/js/generation-demo.js"></script>
 </body>
 </html>
