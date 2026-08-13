@@ -413,6 +413,58 @@
       console.error(error);
     });
 
+  const qualityTableHead = $('#qualityTableHead');
+  const qualityTableBody = $('#qualityTableBody');
+
+  function renderQualitySummary(data) {
+    qualityTableHead.innerHTML = '<th>Model</th><th>Runtime</th>' + data.metrics.map(metric =>
+      `<th>${metric.label}${metric.key === 'quality_drift' ? '&nbsp;↓' : metric.key === 'fps' ? '&nbsp;↑' : ''}</th>`
+    ).join('');
+    const grouped = data.columns.reduce((groups, column) => {
+      (groups[column.model] ||= []).push(column);
+      return groups;
+    }, {});
+    const better = new Set();
+    Object.values(grouped).forEach(columns => {
+      data.metrics.forEach(metric => {
+        const finite = columns.filter(column => Number.isFinite(metric.values[column.key]));
+        if (!finite.length) return;
+        const values = finite.map(column => metric.values[column.key]);
+        const target = metric.key === 'quality_drift' ? Math.min(...values) : Math.max(...values);
+        finite.filter(column => metric.values[column.key] === target)
+          .forEach(column => better.add(`${column.key}:${metric.key}`));
+      });
+    });
+    qualityTableBody.innerHTML = data.columns.map((column, index) => {
+      const rowClass = column.waveRt ? ' class="wave-col"' : '';
+      const startsGroup = index === 0 || data.columns[index - 1].model !== column.model;
+      const modelCell = startsGroup
+        ? `<td class="quality-model-group" rowspan="${grouped[column.model].length}"><b class="quality-metric">${column.model}</b></td>`
+        : '';
+      const cells = data.metrics.map(metric => {
+        const value = metric.values[column.key];
+        const formatted = Number.isFinite(value) ? value.toFixed(metric.precision) : '—';
+        const classes = ['quality-cell'];
+        if (metric.className) classes.push(metric.className);
+        if (better.has(`${column.key}:${metric.key}`)) classes.push('better');
+        if (!Number.isFinite(value)) classes.push('na');
+        return `<td${rowClass}><div class="${classes.join(' ')}">${formatted}</div></td>`;
+      }).join('');
+      return `<tr${startsGroup && index > 0 ? ' class="quality-group-start"' : ''}>${modelCell}<td${rowClass}><b class="quality-runtime">${column.runtime}</b></td>${cells}</tr>`;
+    }).join('');
+  }
+
+  fetch('static/data/hiar_quality_summary.json')
+    .then(response => {
+      if (!response.ok) throw new Error(`Quality data returned ${response.status}`);
+      return response.json();
+    })
+    .then(renderQualitySummary)
+    .catch(error => {
+      qualityTableBody.innerHTML = '<tr><td colspan="10" class="benchmark-load-error">Quality summary could not be loaded.</td></tr>';
+      console.error(error);
+    });
+
   const citationModal = $('#citationModal');
   const citationText = $('#blogCitation');
   const citationCopy = $('#copyCitation');

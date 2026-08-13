@@ -722,75 +722,28 @@
       <div class="benchmark-panel quality-panel reveal">
         <div class="benchmark-toolbar">
           <span class="quality-tab"><i></i>VBench-Long · algorithm × runtime</span>
+          <div class="benchmark-legend"><b>Quality Drift ↓ · FPS ↑</b></div>
+        </div>
+        <div class="benchmark-meta">
+          <div><span>Algorithms</span><strong>HiAR · Wave Forcing</strong></div>
+          <div><span>Runtimes</span><strong>WaveRT · HiAR</strong></div>
+          <div><span>Schedule</span><strong>Native</strong></div>
+          <div><span>Output</span><strong>1596 frames @ 16 FPS</strong></div>
         </div>
         <div class="benchmark-table-wrap">
-          <table class="benchmark-table quality-table">
+          <table class="benchmark-table quality-table hiar-runtime-table">
             <thead>
-              <tr><th>Model</th><th>Temporal Flickering</th><th>Subject Consistency</th><th>Background Consistency</th><th>Motion Smoothness</th><th>Aesthetic Quality</th><th>Imaging Quality</th><th>Quality Drift&nbsp;↓</th><th>FPS&nbsp;↑</th></tr>
+              <tr id="qualityTableHead"><th>Model</th><th>Runtime</th></tr>
             </thead>
-            <tbody>
-              <tr>
-                <td><b class="quality-metric">HiAR on WaveRT</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td><b class="quality-metric">HiAR on HiAR</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td class="wave-col"><b class="quality-metric">Wave Forcing on WaveRT</b></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
-              <tr>
-                <td class="wave-col"><b class="quality-metric">Wave Forcing on HiAR</b></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-                <td class="wave-col"><div class="quality-cell na">—</div></td>
-              </tr>
+            <tbody id="qualityTableBody">
+              <tr><td colspan="10" class="benchmark-load-error">Loading quality summary…</td></tr>
             </tbody>
           </table>
         </div>
+        <div class="benchmark-foot"><span>VBench-Long quality on 10 aligned prompts; WaveRT FPS uses one-shot DiT throughput normalized to 1596 frames.</span><b>Quality Drift = |mean(first 5 s) − mean(last 5 s)| · lower is better.</b></div>
       </div>
 
-      <div class="speed-explainer reveal">
-        <div>
-          <p class="speed-kicker">Why HiAR is faster</p>
-          <h3>Speed follows the wall — and HiAR's walls are cheaper.</h3>
-        </div>
-        <ol>
-          <li><b>No KV-return traffic.</b> HiAR never ships context back toward earlier stages, so its critical path carries no KV-return communication wall.</li>
-          <li><b>A shorter running window.</b> With less context to keep in flight, its bound wall sits lower and each tick does less work — a faster cadence follows naturally.</li>
-        </ol>
-        <p class="speed-note">A higher FPS on a looser pipeline is the expected outcome, not a result to match; the comparison is about what each design trades away to get there.</p>
-      </div>
-
-      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the same 50 MovieGen prompts, one 1593-frame video per prompt at 16 FPS / 99.56 s. Rolling Forcing on WaveRT is the same Rolling Forcing checkpoint decoded with Wave Forcing's block-causal inference. The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long); Causal Forcing (Long) and Wave Forcing 4-step results are pending and will be posted as the sweep completes; the algorithm × runtime sweep is likewise pending. Quality Drift is computed following the Rolling Forcing paper, lower-is-better; every other metric is a VBench-Long percentage, higher-is-better.</p></div>
+      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the same 50 MovieGen prompts, one 1593-frame video per prompt at 16 FPS / 99.56 s. Rolling Forcing on WaveRT is the same Rolling Forcing checkpoint decoded with Wave Forcing's block-causal inference. The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long); Causal Forcing (Long) and Wave Forcing 4-step results are pending and will be posted as the sweep completes. The algorithm × runtime table uses 10 aligned prompts for VBench-Long quality; FPS is DiT-only throughput from a one-shot 399-latent-frame run. Quality Drift is computed following the Rolling Forcing paper, lower-is-better; every other quality metric is higher-is-better.</p></div>
     </section>
 
     <section class="closing">

@@ -1,0 +1,70 @@
+{
+  "report": "HiAR / Wave Forcing algorithm-runtime comparison",
+  "protocol": {
+    "qualityBenchmark": "VBench-Long",
+    "qualityPrompts": 10,
+    "latentFrames": 399,
+    "outputFrames": 1596,
+    "videoFps": 16,
+    "qualityScale": "0-100",
+    "performanceMetric": "DiT-only throughput",
+    "waveRtMode": "one-shot"
+  },
+  "columns": [
+    {"key": "wf_wavert", "label": "Wave Forcing on WaveRT", "model": "Wave Forcing", "runtime": "WaveRT", "waveRt": true},
+    {"key": "wf_hiar", "label": "Wave Forcing on HiAR", "model": "Wave Forcing", "runtime": "HiAR", "waveRt": false},
+    {"key": "hiar_wavert", "label": "HiAR on WaveRT", "model": "HiAR", "runtime": "WaveRT", "waveRt": true},
+    {"key": "hiar_hiar", "label": "HiAR on HiAR", "model": "HiAR", "runtime": "HiAR", "waveRt": false}
+  ],
+  "metrics": [
+    {
+      "key": "fps",
+      "label": "FPS",
+      "precision": 3,
+      "values": {"wf_wavert": 81.766, "wf_hiar": 42.601, "hiar_wavert": 83.023, "hiar_hiar": 42.703}
+    },
+    {
+      "key": "quality_drift",
+      "label": "Quality Drift",
+      "precision": 4,
+      "className": "drift",
+      "values": {"wf_wavert": 0.9799, "wf_hiar": 1.2490, "hiar_wavert": 4.1940, "hiar_hiar": 7.1107}
+    },
+    {
+      "key": "temporal_flickering",
+      "label": "Temporal Flickering",
+      "precision": 4,
+      "values": {"wf_wavert": 96.9323, "wf_hiar": 97.0326, "hiar_wavert": 92.2746, "hiar_hiar": 95.5593}
+    },
+    {
+      "key": "subject_consistency",
+      "label": "Subject Consistency",
+      "precision": 4,
+      "values": {"wf_wavert": 96.3395, "wf_hiar": 96.6296, "hiar_wavert": 93.9766, "hiar_hiar": 95.4305}
+    },
+    {
+      "key": "background_consistency",
+      "label": "Background Consistency",
+      "precision": 4,
+      "values": {"wf_wavert": 96.0194, "wf_hiar": 96.0739, "hiar_wavert": 93.8326, "hiar_hiar": 95.2677}
+    },
+    {
+      "key": "motion_smoothness",
+      "label": "Motion Smoothness",
+      "precision": 4,
+      "values": {"wf_wavert": 98.2376, "wf_hiar": 98.1911, "hiar_wavert": 95.9703, "hiar_hiar": 97.6165}
+    },
+    {
+      "key": "aesthetic_quality",
+      "label": "Aesthetic Quality",
+      "precision": 4,
+      "values": {"wf_wavert": 61.4174, "wf_hiar": 62.0531, "hiar_wavert": 61.9604, "hiar_hiar": 61.3630}
+    },
+    {
+      "key": "imaging_quality",
+      "label": "Imaging Quality",
+      "precision": 4,
+      "values": {"wf_wavert": 68.3123, "wf_hiar": 67.8472, "hiar_wavert": 63.6910, "hiar_hiar": 68.4762}
+    }
+  ]
+}
