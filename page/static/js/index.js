@@ -446,7 +446,7 @@
         const formatted = Number.isFinite(value) ? value.toFixed(metric.precision) : '—';
         const classes = ['quality-cell'];
         if (metric.className) classes.push(metric.className);
-        if (better.has(`${column.key}:${metric.key}`)) classes.push('better');
+        if (better.has(`${column.key}:${metric.key}`)) classes.push('best');
         if (!Number.isFinite(value)) classes.push('na');
         return `<td${rowClass}><div class="${classes.join(' ')}">${formatted}</div></td>`;
       }).join('');
