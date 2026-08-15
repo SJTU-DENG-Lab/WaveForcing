@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="static/css/index.css?v=20260813h">
+  <link rel="stylesheet" href="static/css/index.css?v=20260814a">
   <link rel="stylesheet" href="static/css/generation-demo.css?v=20260813o">
   <script type="application/ld+json">
     {
@@ -701,13 +701,13 @@
               </tr>
               <tr>
                 <td><b class="quality-metric">Causal Forcing (Long)</b></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
-                <td><div class="quality-cell na">—</div></td>
+                <td><div class="quality-cell">94.15</div></td>
+                <td><div class="quality-cell">95.37</div></td>
+                <td><div class="quality-cell">95.07</div></td>
+                <td><div class="quality-cell">97.73</div></td>
+                <td><div class="quality-cell">49.92</div></td>
+                <td><div class="quality-cell">69.24</div></td>
+                <td><div class="quality-cell">2.032</div></td>
               </tr>
               <tr>
                 <td class="wave-col"><b class="quality-metric">Wave Forcing 4-step</b></td>
@@ -722,13 +722,6 @@
       <div class="benchmark-panel quality-panel reveal">
         <div class="benchmark-toolbar">
           <span class="quality-tab"><i></i>VBench-Long · algorithm × runtime</span>
-          <div class="benchmark-legend"><b>Quality Drift ↓ · FPS ↑</b></div>
-        </div>
-        <div class="benchmark-meta">
-          <div><span>Algorithms</span><strong>HiAR · Wave Forcing</strong></div>
-          <div><span>Runtimes</span><strong>WaveRT · HiAR</strong></div>
-          <div><span>Schedule</span><strong>Native</strong></div>
-          <div><span>Output</span><strong>1596 frames @ 16 FPS</strong></div>
         </div>
         <div class="benchmark-table-wrap">
           <table class="benchmark-table quality-table hiar-runtime-table">
@@ -740,10 +733,9 @@
             </tbody>
           </table>
         </div>
-        <div class="benchmark-foot"><span>VBench-Long quality on 10 aligned prompts; WaveRT FPS uses one-shot DiT throughput normalized to 1596 frames.</span><b>Quality Drift = |mean(first 5 s) − mean(last 5 s)| · lower is better.</b></div>
       </div>
 
-      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the same 50 MovieGen prompts, one 1593-frame video per prompt at 16 FPS / 99.56 s. Rolling Forcing on WaveRT is the same Rolling Forcing checkpoint decoded with Wave Forcing's block-causal inference. The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long); Causal Forcing (Long) and Wave Forcing 4-step results are pending and will be posted as the sweep completes. The algorithm × runtime table uses 10 aligned prompts for VBench-Long quality; FPS is DiT-only throughput from a one-shot 399-latent-frame run. Quality Drift is computed following the Rolling Forcing paper, lower-is-better; every other quality metric is higher-is-better.</p></div>
+      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the same 50 MovieGen prompts, one 1593-frame video per prompt at 16 FPS / 99.56 s. Rolling Forcing on WaveRT is the same Rolling Forcing checkpoint decoded with Wave Forcing's block-causal inference. The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long), which runs its native 4-step long-video inference; Wave Forcing 4-step results are pending and will be posted as the sweep completes. The algorithm × runtime table uses 10 aligned prompts for VBench-Long quality; FPS is DiT-only throughput from a one-shot 399-latent-frame run. Quality Drift is computed following the Rolling Forcing paper, lower-is-better; every other quality metric is higher-is-better.</p></div>
     </section>
 
     <section class="closing">
@@ -782,7 +774,7 @@
       <p class="citation-copy-status" id="citationCopyStatus" aria-live="polite"></p>
     </section>
   </div>
-  <script src="static/js/index.js"></script>
+  <script src="static/js/index.js?v=20260814a"></script>
   <script src="static/js/generation-demo.js?v=20260813n"></script>
 </body>
 </html>
