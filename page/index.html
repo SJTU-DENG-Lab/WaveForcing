@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="static/css/index.css?v=20260814a">
-  <link rel="stylesheet" href="static/css/generation-demo.css?v=20260813o">
+  <link rel="stylesheet" href="static/css/generation-demo.css?v=20260814i">
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -101,13 +101,75 @@
     <section class="generation-demo" id="demo" data-generation-demo>
       <div class="generation-demo-head reveal">
         <div>
-          <h2>One video—or eight arriving in <em>waves</em>.</h2>
+          <h2><span class="roll-word">Roll</span> out one video—or eight arriving in <em>waves</em>.</h2>
         </div>
       </div>
 
       <div class="demo-slot reveal">
-        <span class="demo-slot-tag">4-step denoising · in training</span>
-        <div class="demo-pending"><b>Stay tuned</b><small>Wave Forcing 4-step live comparison will be posted here</small></div>
+        <div class="demo-slot-head">
+          <span class="demo-slot-tag">4-step denoising</span>
+          <div class="generation-demo-controls" aria-label="Generation demo controls">
+            <div class="demo-speed" role="group" aria-label="Timeline speed">
+              <span>Timeline</span>
+              <button type="button" data-demo-speed="1">1× wall clock</button>
+              <button class="active" type="button" data-demo-speed="8">8× preview</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="generation-demo-stage">
+        <article class="demo-lane demo-rolling" data-demo-lane="rolling">
+          <header class="demo-lane-head">
+            <h3>Rolling Forcing</h3>
+            <span class="demo-lane-clock" data-lane-clock>0.0 s</span>
+          </header>
+          <div class="demo-lane-body">
+            <button class="demo-card" type="button" data-demo-card data-generation="117.390" data-seed="19" aria-label="Rolling Forcing 4-step p19 sample; available after generation">
+              <video muted playsinline preload="auto" poster="static/images/demo/rf4-p19.jpg" src="static/videos/demo/rf4-p19.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+            </button>
+            <span class="demo-lane-badge" data-lane-badge>1 video in 117.4 s</span>
+          </div>
+          <div class="demo-lane-progress"><i data-lane-progress></i></div>
+        </article>
+
+        <article class="demo-lane demo-wave" data-demo-lane="wave">
+          <header class="demo-lane-head">
+            <h3>Wave Forcing</h3>
+            <span class="demo-lane-clock" data-lane-clock>0.0 s</span>
+          </header>
+          <div class="demo-lane-body">
+            <div class="demo-lane-grid">
+              <button class="demo-card" type="button" data-demo-card data-generation="13.195" data-seed="1" aria-label="Wave Forcing 4-step p01 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p01.jpg" src="static/videos/demo/wf4-p01.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+              <button class="demo-card" type="button" data-demo-card data-generation="13.168" data-seed="2" aria-label="Wave Forcing 4-step p02 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p02.jpg" src="static/videos/demo/wf4-p02.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+              <button class="demo-card" type="button" data-demo-card data-generation="13.139" data-seed="4" aria-label="Wave Forcing 4-step p04 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p04.jpg" src="static/videos/demo/wf4-p04.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+              <button class="demo-card" type="button" data-demo-card data-generation="13.127" data-seed="12" aria-label="Wave Forcing 4-step p12 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p12.jpg" src="static/videos/demo/wf4-p12.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+              <button class="demo-card" type="button" data-demo-card data-generation="13.112" data-seed="14" aria-label="Wave Forcing 4-step p14 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p14.jpg" src="static/videos/demo/wf4-p14.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+              <button class="demo-card" type="button" data-demo-card data-generation="13.141" data-seed="25" aria-label="Wave Forcing 4-step p25 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p25.jpg" src="static/videos/demo/wf4-p25.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+              <button class="demo-card" type="button" data-demo-card data-generation="13.142" data-seed="35" aria-label="Wave Forcing 4-step p35 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p35.jpg" src="static/videos/demo/wf4-p35.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+              <button class="demo-card" type="button" data-demo-card data-generation="13.134" data-seed="44" aria-label="Wave Forcing 4-step p44 sample; available after generation">
+                <video muted playsinline preload="auto" poster="static/images/demo/wf4-p44.jpg" src="static/videos/demo/wf4-p44.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              </button>
+            </div>
+            <span class="demo-lane-badge" data-lane-badge>8 videos generated in 105.2 s</span>
+          </div>
+          <div class="demo-lane-progress"><i data-lane-progress></i></div>
+        </article>
+      </div>
+        <p class="demo-footnote">4-step results · WaveRT causal paged KV exchange · SageAttention · 5 DiT + 3 VAE stages on 8×H200 · 5-step checkpoint forced to 4-step inference · all clips generated as 100 s videos</p>
       </div>
 
       <div class="demo-slot reveal">
@@ -130,7 +192,7 @@
           </header>
           <div class="demo-lane-body">
             <button class="demo-card" type="button" data-demo-card data-generation="134.027" data-seed="41" aria-label="Rolling Forcing p41 sample; available after generation">
-              <video muted playsinline preload="metadata" poster="static/images/demo/rf-p41.jpg" src="static/videos/demo/rf-p41.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+              <video muted playsinline preload="auto" poster="static/images/demo/rf-p41.jpg" src="static/videos/demo/rf-p41.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
             </button>
             <span class="demo-lane-badge" data-lane-badge>1 video in 134.0 s</span>
           </div>
@@ -145,28 +207,28 @@
           <div class="demo-lane-body">
             <div class="demo-lane-grid">
               <button class="demo-card" type="button" data-demo-card data-generation="19.019" data-seed="48" aria-label="Wave Forcing p48 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p48.jpg" src="static/videos/demo/wf-p48.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p48.jpg" src="static/videos/demo/wf-p48.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
               <button class="demo-card" type="button" data-demo-card data-generation="18.988" data-seed="28" aria-label="Wave Forcing p28 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p28.jpg" src="static/videos/demo/wf-p28.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p28.jpg" src="static/videos/demo/wf-p28.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
               <button class="demo-card" type="button" data-demo-card data-generation="19.008" data-seed="20" aria-label="Wave Forcing p20 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p20.jpg" src="static/videos/demo/wf-p20.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p20.jpg" src="static/videos/demo/wf-p20.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
               <button class="demo-card" type="button" data-demo-card data-generation="19.007" data-seed="18" aria-label="Wave Forcing p18 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p18.jpg" src="static/videos/demo/wf-p18.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p18.jpg" src="static/videos/demo/wf-p18.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
               <button class="demo-card" type="button" data-demo-card data-generation="19.386" data-seed="14" aria-label="Wave Forcing p14 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p14.jpg" src="static/videos/demo/wf-p14.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p14.jpg" src="static/videos/demo/wf-p14.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
               <button class="demo-card" type="button" data-demo-card data-generation="19.001" data-seed="10" aria-label="Wave Forcing p10 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p10.jpg" src="static/videos/demo/wf-p10.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p10.jpg" src="static/videos/demo/wf-p10.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
               <button class="demo-card" type="button" data-demo-card data-generation="18.995" data-seed="46" aria-label="Wave Forcing p46 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p46.jpg" src="static/videos/demo/wf-p46.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p46.jpg" src="static/videos/demo/wf-p46.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
               <button class="demo-card" type="button" data-demo-card data-generation="19.027" data-seed="41" aria-label="Wave Forcing p41 sample; available after generation">
-                <video muted playsinline preload="metadata" poster="static/images/demo/wf-p41.jpg" src="static/videos/demo/wf-p41.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
+                <video muted playsinline preload="auto" poster="static/images/demo/wf-p41.jpg" src="static/videos/demo/wf-p41.mp4" tabindex="-1"></video><canvas aria-hidden="true"></canvas><span class="demo-card-control" aria-hidden="true"></span>
               </button>
             </div>
             <span class="demo-lane-badge" data-lane-badge>8 videos generated in 152.4 s</span>
@@ -174,7 +236,7 @@
           <div class="demo-lane-progress"><i data-lane-progress></i></div>
         </article>
       </div>
-        <p class="demo-footnote">5-step results · BF16 · WaveRT causal paged KV exchange · torch_sdpa attention · 6 DiT + 2 VAE stages on 8×H200</p>
+        <p class="demo-footnote">5-step results · WaveRT causal paged KV exchange · torch_sdpa attention · 6 DiT + 2 VAE stages on 8×H200 · all clips generated as 100 s videos</p>
       </div>
     </section>
 
@@ -774,6 +836,6 @@
     </section>
   </div>
   <script src="static/js/index.js?v=20260814a"></script>
-  <script src="static/js/generation-demo.js?v=20260813n"></script>
+  <script src="static/js/generation-demo.js?v=20260814g"></script>
 </body>
 </html>
