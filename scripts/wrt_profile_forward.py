@@ -25,17 +25,14 @@ def main() -> None:
     os.environ.setdefault("MASTER_PORT", "29717")
 
     from wave_rt.config import WaveConfig
-    from wave_rt import backend as be_mod
-    from wave_rt.backend import WaveBackend
+    from wave_rt.runtime import backend as be_mod
+    from wave_rt.runtime.backend import WaveBackend
 
     cfg = WaveConfig(rf_step=0, wp_size=1, num_frames=3, height=480, width=832, seed=0)
     be = WaveBackend(cfg, rank=0)
     be.init()
 
     npb = cfg.num_frames_per_block
-    C = be.latent_channels
-    dev = be.device
-    dt = be.ctx.target_dtype
     noise = be.full_noise_bcthw[:, :, 0:npb].contiguous()
 
     # exchange that fabricates an 8-chunk (~37440 token) joint context, like the
@@ -60,11 +57,15 @@ def main() -> None:
     for _ in range(5):
         be.forward_chunk(noise, float(be.dsl[0].item()), start_frame=0)
     torch.cuda.synchronize()
-    print(f"[prof] mean forward (ctx={N_CTX_CHUNKS}x{npb*1560}) = "
-          f"{(time.perf_counter()-t)/5*1000:.1f} ms", flush=True)
+    print(
+        f"[prof] mean forward (ctx={N_CTX_CHUNKS}x{npb * 1560}) = "
+        f"{(time.perf_counter() - t) / 5 * 1000:.1f} ms",
+        flush=True,
+    )
 
     # profiler
     from torch.profiler import profile, ProfilerActivity
+
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
         for _ in range(3):
             be.forward_chunk(noise, float(be.dsl[0].item()), start_frame=0)
@@ -72,8 +73,9 @@ def main() -> None:
     be_mod.set_exchange_fn(None)
 
     print("\n===== TOP OPS BY CUDA TIME =====", flush=True)
-    print(prof.key_averages().table(
-        sort_by="cuda_time_total", row_limit=25), flush=True)
+    print(
+        prof.key_averages().table(sort_by="cuda_time_total", row_limit=25), flush=True
+    )
     be.shutdown()
 
 

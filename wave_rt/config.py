@@ -1,156 +1,79 @@
-"""WaveConfig -- all knobs for a WaveRT run, plus argparse wiring.
-
-Kept as a plain dataclass (WaveRT is a standalone runtime outside the sglang
-source tree, so the sgl ``msgspec.Struct`` rule does not apply here).
-"""
+"""WaveRT configuration and command-line wiring."""
 
 from __future__ import annotations
 
 import argparse
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-# --- default asset paths (verified present on this box) ---------------------
 DEFAULT_MODEL_PATH = "./ckpts/Wan2.1-T2V-1.3B-Diffusers"
-DEFAULT_GEN_CKPT = (
-    "./ckpts/zhuhz22/Causal-Forcing/chunkwise/longvideo.pt"
-)
+DEFAULT_GEN_CKPT = "./ckpts/zhuhz22/Causal-Forcing/chunkwise/longvideo.pt"
 DEFAULT_PROMPT = (
     "A cinematic shot of a fluffy corgi running on a sunny beach, "
     "waves in the background."
 )
-# Outputs live inside the repo (gitignored via ``outputs/*``).
-# Repo root = two levels up from this file.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT_ROOT = os.path.join(_REPO_ROOT, "outputs")
+
+ATTENTION_BACKENDS = ("torch_sdpa", "fa_custom", "sa", "fa", "fa2")
+KV_CONTEXTS = ("joint", "causal")
+EXCHANGE_MODES = ("sync", "overlap", "onesided", "relay", "staggered", "paged")
+CAUSAL_EXCHANGE_MODES = frozenset(EXCHANGE_MODES[1:])
+VAE_PARTITIONS = ("time", "flops")
 
 
 @dataclass
 class WaveConfig:
-    # --- wavefront topology ---
-    # The real Causal-Forcing long_video RF (chunkwise longvideo.pt) is a 4-step
-    # DMD: denoising_step_list = [1000,750,500,250] warped (see
-    # Causal-Forcing/long_video/configs/rolling_forcing_dmd.yaml).  So 4 denoise
-    # ranks + 1 clean-KV store rank = 5.  NOTE: sglang's RollingForcingWanT2V480PConfig
-    # ships a WRONG 5-step [1000,800,600,400,200] default -- we override it in
-    # backend.init from denoising_step_list below (never trust the sgl config here).
-    rf_step: int = 4  # number of denoising steps (== number of denoise ranks)
-    wp_size: int = 5  # total ranks = rf_step + 1 (last rank = clean-KV store)
-    # DMD schedule for the loaded checkpoint (raw, pre-warp).  len == rf_step.
+    # Wavefront topology: one denoise rank per DMD step plus one KV store rank.
+    rf_step: int = 4
+    wp_size: int = 5
     denoising_step_list: tuple = (1000, 750, 500, 250)
 
-    # --- generation shape ---
-    num_frames: int = 24  # LATENT frames (must be divisible by num_frames_per_block=3)
+    # Generation shape. num_frames counts latent frames.
+    num_frames: int = 24
     height: int = 480
     width: int = 832
     seed: int = 0
     prompt: str = DEFAULT_PROMPT
 
-    # --- model / checkpoints ---
     model_path: str = DEFAULT_MODEL_PATH
     gen_ckpt: str = DEFAULT_GEN_CKPT
     pipeline_class_name: str = "WanRollingForcingPipeline"
-    attention_backend: str = "torch_sdpa"  # driver-safe default; fa2 later
-    # Online DiT quantization method passed straight through to sglang's
-    # ServerArgs.quantization (e.g. "fp8" = W8A8 fp8 weights + dynamic per-token
-    # fp8 activations).  None = bf16 (default).  Quantizes the linear GEMMs
-    # (qkv/out proj + FFN); complementary to --attention-backend sa (attention).
+    attention_backend: str = "torch_sdpa"
+    # Post-load DiT linear quantization. None keeps bf16 weights.
     quantization: str | None = None
-    # System-level scaling test: build a LARGER Wan DiT (e.g. "14b") from config
-    # with random weights (no RF checkpoint exists for it), skipping weight load.
-    # None / "1.3b" = the real model.  Output is meaningless; measures the
-    # wavefront system's tick/memory/comm at scale.
+    # Optional random-weight DiT used only for system scaling measurements.
     dit_scale: str | None = None
-    # KV attention context assembly for the denoise ranks:
-    #   "joint"  = every in-flight chunk attends to ALL in-flight chunks (current
-    #              default; uniform load, no slack; slightly non-causal).
-    #   "causal" = chunk-causal / "overlap" semantics: rank r attends only to
-    #              in-flight ranks n >= r (chunks at position <= its own) -> matches
-    #              naive block-causal, and gives the per-stage load imbalance (slack)
-    #              the overlap design needs.  all_gather is unchanged (NCCL-aligned).
+    # "joint" sees every in-flight chunk; "causal" sees ranks n >= r.
     kv_context: str = "joint"
-    # KV exchange comm form:
-    #   "sync"    = per-layer blocking all_gather (current; works with joint/causal).
-    #   "overlap" = async P2P cascade (older/faster ranks -> newer/slower ranks)
-    #               overlapped with compute; hides the KV writeback in the per-stage
-    #               slack.  REQUIRES kv_context="causal" (only causal gives slack).
-    #               Numerically identical to causal+sync (movement-only).
-    #   "onesided"= one-sided current-KV publication (Gate C-final-1): producer
-    #               writes each consumer's remote_kv slab directly the instant its
-    #               layer-L K/V is ready (cuMemcpyDtoDAsync on a copy stream + a
-    #               device-side generation flag), no matching recv.  Eliminates the
-    #               depth-1 two-sided inbound-KV wait AND the cold-start cascade.
-    #               REQUIRES kv_context="causal".  Numerically identical to causal+sync.
-    #   "relay"   = neighbor-accumulating relay: instead of the all-pairs one-sided
-    #               fan-out (producer r writes every slower consumer -> heavy
-    #               copy-engine contention on the middle ranks), each rank talks to
-    #               exactly ONE neighbor.  Layer-wise the KV bundle cascades down the
-    #               chain store -> rf_step-1 -> ... -> 1 -> 0, each hop MERGING the
-    #               upstream bundle with the local KV into one contiguous slice and
-    #               forwarding it in a single cuMemcpyDtoDAsync.  NVLink bytes are
-    #               unchanged (1+2+..+rf_step chunk-hops == all-pairs) but the fan-out
-    #               drops from rf_step to 1, eliminating the all-pairs CE burst.
-    #               REQUIRES kv_context="causal".  Numerically identical to causal+sync.
-    #   "staggered"= onesided transport + PREFETCHED (staggered) inbound acquire:
-    #               the device-side generation-flag acquire for a consumer's layer L
-    #               is issued `stagger_lead` layers EARLY on a dedicated prefetch
-    #               stream (recorded as a CUDA event), so the producer's layer-L KV
-    #               transfer overlaps the consumer's (L-lead..L) compute -- hiding the
-    #               tight same-layer producer->consumer edge (esp. store->highest
-    #               denoise rank) that onesided gates at the point of use.  Reuses the
-    #               one-sided slab/IPC machinery; REQUIRES kv_context="causal".
-    #               Numerically identical to causal+sync (movement/timing only).
+    # KV movement strategy; every non-sync mode requires causal context.
     exchange_mode: str = "sync"
-    # staggered lead: how many layers earlier the inbound KV acquire is prefetched
-    # (== how many layers the tight-edge producer leads the consumer).  Only used by
-    # exchange_mode="staggered"; 1 is the validated default (deeper leads just kick
-    # the same device-side waits earlier and cost a few more in-flight events).
     stagger_lead: int = 1
-    # KV transport precision for the ONESIDED exchange only.  "bf16" (default) sends
-    # the exchanged KV verbatim; "fp8" quantizes each published (2,T,H,D) KV slot to
-    # fp8 e4m3 (per-tensor absmax scale) before the NVLink copy -> ~half the bytes /
-    # copy time, dequantized back to bf16 on the consumer before attention.  No effect
-    # on sync/overlap/relay/staggered (they stay bf16).
     kv_transport_dtype: str = "bf16"
 
-    # --- distributed ---
     master_addr: str = "127.0.0.1"
     master_port: int = 29677
-    cuda_visible_devices: str | None = None  # e.g. "0,1,2,3,4"; None = leave as-is
+    cuda_visible_devices: str | None = None
 
-    # --- VAE decode: n-stage FLOPs-balanced streaming pipeline (naive VAE, bf16) ---
-    # 0 = serial VAE on the store rank (wave_rt/vae.py::finalize_on_store, backward-compat).
-    # n>0 = n independent VAE-stage procs (GPUs wp_size..wp_size+n-1) fed by an mp.Queue
-    # from the store rank; decoder split by per-layer FLOPs (naive_rt.wave.vae_pipe).
+    # Zero VAE stages decodes on the store rank; positive values stream stages.
     vae_stages: int = 3
-    vae_port: int = 29688  # separate NCCL world (disjoint from the diffusion world)
-    # How to split the decoder across VAE stages.  "time" = measure each unit's
-    # real ms at init and min-max partition (the high-res upsample blocks have
-    # equal FLOPs but ~6x the time, so FLOPs mis-balances by ~1.8x at n=3; timing
-    # cuts the slowest stage ~1.6x).  "flops" = the old analytic FLOPs split.
+    vae_port: int = 29688
     vae_partition: str = "time"
 
-    # --- serving (model resident; HTTP + FIFO job queue) ---
     serve: bool = False
     serve_host: str = "127.0.0.1"
     serve_port: int = 8890
-    # one-time startup warmup runs a full dummy generation through the real path so
-    # steady-state full-window kernels/NCCL/VAE (+ torch.compile if on) are all hot.
-    # Per-tick shapes depend on the sliding window, not total frames, so ~8 chunks
-    # (24 frames) warms the same kernels as a long video -> keep it small.
     warmup_frames: int = 24
 
-    # --- output / bench ---
     out_root: str = DEFAULT_OUT_ROOT
     task: str = "wave_rt_phase1"
     run_tag: str = "wrt"
     save_video: bool = True
-    ref_latents: str = ""  # single-GPU RF latents.pt for the PSNR gate
+    ref_latents: str = ""
     baseline_e2e: float = 0.0
 
-    # --- derived / constants (Wan2.1-T2V-1.3B causal RF) ---
     num_frames_per_block: int = 3
-    compile: bool = False  # torch.compile the DiT block (fuse fp32 norms/FFN)
+    compile: bool = False
 
     def __post_init__(self) -> None:
         if self.rf_step + 1 != self.wp_size:
@@ -168,7 +91,10 @@ class WaveConfig:
                 f"num_frames ({self.num_frames}) must be divisible by "
                 f"num_frames_per_block ({self.num_frames_per_block})"
             )
-        if self.exchange_mode in ("overlap", "onesided", "relay", "staggered", "paged") and self.kv_context != "causal":
+        if (
+            self.exchange_mode in CAUSAL_EXCHANGE_MODES
+            and self.kv_context != "causal"
+        ):
             raise ValueError(
                 f"--exchange-mode {self.exchange_mode} requires --kv-context causal "
                 "(only the causal context creates the per-stage slack / the n>=r "
@@ -193,10 +119,9 @@ class WaveConfig:
 
     @property
     def n_total_gpus(self) -> int:
-        """diffusion ranks + VAE-stage ranks (VAE on GPUs wp_size..wp_size+vae_stages-1)."""
+        """Number of diffusion and VAE ranks combined."""
         return self.wp_size + max(0, self.vae_stages)
 
-    # ------------------------------------------------------------------ CLI
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
         g = parser
@@ -208,12 +133,16 @@ class WaveConfig:
                             "Default is the 4-step longvideo.pt schedule.")
         g.add_argument("--num-frames", type=int, default=WaveConfig.num_frames,
                        help="LATENT frames (divisible by 3)")
-        g.add_argument("--vae-stages", dest="vae_stages", type=int, default=WaveConfig.vae_stages,
-                       help="n-stage FLOPs-balanced streaming VAE (0 = serial on store rank); "
-                            "total GPUs = wp_size + vae_stages")
+        g.add_argument(
+            "--vae-stages",
+            dest="vae_stages",
+            type=int,
+            default=WaveConfig.vae_stages,
+            help="number of streaming VAE stages; 0 decodes on the store rank",
+        )
         g.add_argument("--vae-port", type=int, default=WaveConfig.vae_port)
         g.add_argument("--vae-partition", type=str, default=WaveConfig.vae_partition,
-                       choices=["time", "flops"],
+                       choices=VAE_PARTITIONS,
                        help="split decoder across VAE stages by measured time "
                             "(default) or analytic FLOPs")
         g.add_argument("--serve", action="store_true",
@@ -231,39 +160,21 @@ class WaveConfig:
         g.add_argument("--gen-ckpt", type=str, default=WaveConfig.gen_ckpt)
         g.add_argument("--attention-backend", type=str,
                        default=WaveConfig.attention_backend,
-                       choices=["torch_sdpa", "fa_custom", "sa", "fa", "fa2"])
+                       choices=ATTENTION_BACKENDS)
         g.add_argument("--quantization", type=str, default=WaveConfig.quantization,
-                       help="online DiT quantization passed to sglang ServerArgs "
-                            "(e.g. 'fp8' = W8A8 fp8 weights + dynamic fp8 acts). "
-                            "None = bf16.")
+                       help="post-load DiT linear quantization; None keeps bf16")
         g.add_argument("--dit-scale", type=str, default=WaveConfig.dit_scale,
                        choices=["1.3b", "5b", "14b"],
                        help="system-level scaling test: build a larger random-init "
                             "DiT (no RF ckpt; output meaningless). Default = real 1.3b.")
         g.add_argument("--kv-context", type=str, default=WaveConfig.kv_context,
-                       choices=["joint", "causal"],
-                       help="denoise attention context: 'joint' (all in-flight, current "
-                            "default) or 'causal' (chunk-causal / overlap semantics: "
-                            "rank r sees only in-flight ranks n>=r).")
+                       choices=KV_CONTEXTS,
+                       help="'joint' sees all in-flight ranks; 'causal' sees n>=r")
         g.add_argument("--exchange-mode", type=str, default=WaveConfig.exchange_mode,
-                       choices=["sync", "overlap", "onesided", "relay", "staggered", "paged"],
-                       help="KV exchange comm: 'sync' (per-layer all_gather), "
-                            "'overlap' (async P2P cascade hidden in compute), "
-                            "'onesided' (Gate C-final-1 direct remote-slab publication "
-                            "via copy-engine + generation flag), 'relay' "
-                            "(neighbor-accumulating one-sided relay: fan-out 1, merged "
-                            "single memcpy per hop), 'staggered' (onesided transport "
-                            "+ prefetched inbound acquire: producer leads consumer by "
-                            "--stagger-lead layers, hiding the tight same-layer edge), or "
-                            "'paged' (onesided transport, but producers DMA KV directly "
-                            "into fixed slots of the consumer's contiguous attention "
-                            "buffer so attention reads in place -- no per-layer torch.cat; "
-                            "steady-state ticks only, falls back to onesided during "
-                            "fill/drain). "
-                            "overlap/onesided/relay/staggered/paged require --kv-context causal.")
+                       choices=EXCHANGE_MODES,
+                       help="KV transport strategy; non-sync modes require causal context")
         g.add_argument("--stagger-lead", type=int, default=WaveConfig.stagger_lead,
-                       help="exchange-mode=staggered: how many layers early to prefetch "
-                            "the inbound KV acquire (== producer lead). Default 1.")
+                       help="layers of acquire prefetch for staggered exchange")
         g.add_argument("--master-port", type=int, default=WaveConfig.master_port)
         g.add_argument("--cuda-visible-devices", type=str, default=None)
         g.add_argument("--out-root", type=str, default=WaveConfig.out_root)

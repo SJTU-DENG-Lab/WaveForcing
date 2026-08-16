@@ -1,39 +1,26 @@
-"""WaveRT backend -- the ONLY module that reaches into sglang internals.
+"""SGLang integration for per-rank WaveRT model replicas.
 
-Responsibilities (per rank):
-  0. At import time, monkeypatch ``CausalWanSelfAttention.forward`` so that, when
-     WaveRT installs a per-tick "exchange" closure, the self-attention bypasses
-     the single-GPU KV cache and instead attends over a KV context assembled by
-     WaveRT (anchor + working + live-clean + in-flight chunks).  This is the same
-     hook we prototyped on the abandoned wave-parallel branch, now expressed as a
-     runtime patch so sglang source stays pristine.
-  1. Own the torch.distributed world (size == wp_size).  sglang model-parallel
-     degrees are all 1 (init via data_parallel_size=wp_size so every rank gets a
-     valid singleton TP/SP group -> the model does zero collective comm), leaving
-     the default WORLD process group free for WaveRT's wavefront collectives.
-  2. build_pipeline() and expose transformer / vae / scheduler / RF stage plus a
-     single-chunk DiT forward helper and a VAE decode helper.
-
-Everything wave-specific lives here or in wavefront.py; sglang is unmodified.
+Self-attention is patched at runtime so SGLang source stays unchanged.
 """
 
 from __future__ import annotations
 
 import os
+import time
 from typing import Callable
 
 import torch
 import torch.distributed as dist
 
 from wave_rt.config import WaveConfig
+from wave_rt.runtime.env import env_flag
 
-# --- module-level state read by the monkeypatched attention -----------------
-# ``exchange_fn`` is set by wavefront.py right before an active rank runs a
-# single-chunk DiT forward, and cleared afterwards.  When None, the patched
-# forward falls through to the original sglang implementation (so a wp_size==1
-# smoke run is bit-identical to single-GPU RF).
-_WAVE_STATE: dict = {"exchange_fn": None, "attn": "torch_sdpa", "fa_func": None,
-                     "layer_prof_sink": None}
+_WAVE_STATE: dict = {
+    "exchange_fn": None,
+    "attn": "torch_sdpa",
+    "fa_func": None,
+    "layer_prof_sink": None,
+}
 
 
 def set_exchange_fn(fn: Callable | None) -> None:
@@ -41,10 +28,7 @@ def set_exchange_fn(fn: Callable | None) -> None:
 
 
 def set_layer_prof_sink(sink) -> None:
-    """WAVE_LAYER_PROF: install a list into which the patched attention appends one
-    CUDA event (enable_timing) right AFTER each layer's attention -> lets wavefront
-    separate sage time from pre-attn compute.  None disables (no per-layer overhead
-    on the hot path when off)."""
+    """Set the optional sink for attention completion events."""
     _WAVE_STATE["layer_prof_sink"] = sink
 
 
@@ -63,10 +47,7 @@ def prof_read() -> tuple:
 
 
 def enable_fa_custom() -> None:
-    """Route the wavefront attention through our own pip-compiled flash_attn
-    (flash_attn 2.8.4), bypassing sglang's LocalAttention -> jit_kernel path
-    (LocalAttention doesn't even list FA2, and FA routes to the cu13 jit kernel
-    that's broken on this driver).  Only affects the exchange path."""
+    """Use the installed FlashAttention function on the wavefront path."""
     from flash_attn import flash_attn_func
 
     _WAVE_STATE["attn"] = "fa_custom"
@@ -74,13 +55,22 @@ def enable_fa_custom() -> None:
 
 
 def enable_sage() -> None:
-    """Route the wavefront attention through SageAttention (int8-quantized, ~2x
-    faster than flash on large contexts, near-lossless here: vs SDPA maxdiff
-    ~1.7e-3).  Only affects the exchange path."""
+    """Use SageAttention on the wavefront path."""
     from sageattention import sageattn
 
     _WAVE_STATE["attn"] = "sa"
     _WAVE_STATE["fa_func"] = sageattn
+
+
+def _profile_start() -> float:
+    torch.cuda.synchronize()
+    return time.perf_counter()
+
+
+def _profile_finish(metric: str, started_at: float) -> None:
+    torch.cuda.synchronize()
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    _WAVE_STATE[metric] = _WAVE_STATE.get(metric, 0.0) + elapsed_ms
 
 
 def _install_attention_monkeypatch() -> None:
@@ -91,8 +81,7 @@ def _install_attention_monkeypatch() -> None:
         return
 
     orig_forward = cw.CausalWanSelfAttention.forward
-    # NOTE: _apply_rotary_emb was bound into the causal_wanvideo namespace at its
-    # import time, so read it from there (not the origin module).
+    # The model module binds this symbol at import time; patch against that copy.
     apply_rope = cw._apply_rotary_emb
 
     def patched_forward(
@@ -113,19 +102,25 @@ def _install_attention_monkeypatch() -> None:
         exch = _WAVE_STATE["exchange_fn"]
         if exch is None:
             return orig_forward(
-                self, q, k, v, freqs_cis, block_mask, kv_cache,
-                current_start, cache_start, updating_cache,
-                tokens_per_frame, post_patch_height, post_patch_width,
+                self,
+                q,
+                k,
+                v,
+                freqs_cis,
+                block_mask,
+                kv_cache,
+                current_start,
+                cache_start,
+                updating_cache,
+                tokens_per_frame,
+                post_patch_height,
+                post_patch_width,
             )
         cos, sin = freqs_cis
         roped_query = apply_rope(q, cos, sin, is_neox_style=False).type_as(v)
         roped_key = apply_rope(k, cos, sin, is_neox_style=False).type_as(v)
-        # The closure assembles the full (K, V) context for this layer across the
-        # wavefront and returns them ready for attention.  ``k`` is the un-roped
-        # key (needed to re-RoPE the anchor at a shifted start frame).
-        if _WAVE_STATE.get("prof"):
-            import time as _t
-            torch.cuda.synchronize(); _e = _t.perf_counter()
+        profiled = bool(_WAVE_STATE.get("prof"))
+        started_at = _profile_start() if profiled else 0.0
         ctx_k, ctx_v = exch(
             layer_idx=self._wave_layer_idx,
             roped_query=roped_query,
@@ -140,11 +135,9 @@ def _install_attention_monkeypatch() -> None:
             rope_num_heads=self.rope_num_heads,
             num_frames_per_block=self.num_frames_per_block,
         )
-        if _WAVE_STATE.get("prof"):
-            import time as _t
-            torch.cuda.synchronize()
-            _WAVE_STATE["exch_ms"] = _WAVE_STATE.get("exch_ms", 0.0) + (_t.perf_counter() - _e) * 1000
-            _a = _t.perf_counter()
+        if profiled:
+            _profile_finish("exch_ms", started_at)
+            started_at = time.perf_counter()
         if _WAVE_STATE["attn"] == "fa_custom":
             out = _WAVE_STATE["fa_func"](roped_query, ctx_k, ctx_v, causal=False)
         elif _WAVE_STATE["attn"] == "sa":
@@ -153,18 +146,14 @@ def _install_attention_monkeypatch() -> None:
             )
         else:
             out = self.attn(roped_query, ctx_k, ctx_v)
-        if _WAVE_STATE.get("prof"):
-            import time as _t
-            torch.cuda.synchronize()
-            _WAVE_STATE["attn_ms"] = _WAVE_STATE.get("attn_ms", 0.0) + (_t.perf_counter() - _a) * 1000
+        if profiled:
+            _profile_finish("attn_ms", started_at)
             _WAVE_STATE["klen"] = ctx_k.shape[1]
-        # WAVE_LAYER_PROF: mark this layer's attention end (async event; no sync ->
-        # negligible hot-path cost).  Ordered on the compute stream after `out`.
-        _lp_sink = _WAVE_STATE.get("layer_prof_sink")
-        if _lp_sink is not None:
-            _e_pa = torch.cuda.Event(enable_timing=True)
-            _e_pa.record()
-            _lp_sink.append(_e_pa)
+        layer_prof_sink = _WAVE_STATE.get("layer_prof_sink")
+        if layer_prof_sink is not None:
+            event = torch.cuda.Event(enable_timing=True)
+            event.record()
+            layer_prof_sink.append(event)
         return out
 
     patched_forward._wave_orig = orig_forward
@@ -181,7 +170,6 @@ class WaveBackend:
         self.world = cfg.wp_size
         self.device = torch.device(f"cuda:{rank}")
 
-        # populated by init()
         self.server_args = None
         self.pipeline = None
         self.transformer = None
@@ -190,31 +178,23 @@ class WaveBackend:
         self.rf_stage = None
         self.decode_stage = None
         self.batch = None
-        self.ctx = None  # CausalDMDForwardContext
+        self.ctx = None
         self.num_token_per_frame = None
         self.num_layers = None
         self.latent_channels = None
 
-    # ------------------------------------------------------------------ init
     def init(self) -> None:
         torch.cuda.set_device(self.rank)
         torch.set_grad_enabled(False)
-        # Per-rank intra-op thread cap (WAVE_THREADS=N; launcher defaults it to an
-        # even core split -- critical: uncapped 6x128 OMP threads crush the forward,
-        # 1050ms -> 180ms).  "0"/"" leaves torch's default (no cap).
-        import os as _os
-        _wt = _os.environ.get("WAVE_THREADS", "")
-        if _wt not in ("", "0"):
-            torch.set_num_threads(int(_wt))
+        wave_threads = os.environ.get("WAVE_THREADS", "")
+        if wave_threads not in ("", "0"):
+            torch.set_num_threads(int(wave_threads))
 
-        # env for sglang's distributed bring-up
         os.environ["WORLD_SIZE"] = str(self.world)
         os.environ["RANK"] = str(self.rank)
         os.environ["LOCAL_RANK"] = str(self.rank)
 
-        # patch BEFORE any model construction
         _install_attention_monkeypatch()
-        # WaveRT-level attention choice for the wavefront path
         if self.cfg.attention_backend == "fa_custom":
             enable_fa_custom()
         elif self.cfg.attention_backend == "sa":
@@ -226,13 +206,12 @@ class WaveBackend:
         )
         from sglang.multimodal_gen.runtime.pipelines_core import build_pipeline
 
-        from wave_rt.dist_compat import (
+        from wave_rt.distributed.compat import (
             disable_rf_config_patch,
             init_wave_dist,
         )
 
-        # sglang always gets a driver-safe backend for any non-wavefront path;
-        # the wavefront attention is controlled by cfg.attention_backend above.
+        # Custom kernels handle only the wavefront path; SGLang uses SDPA elsewhere.
         sgl_attn = (
             "torch_sdpa"
             if self.cfg.attention_backend in ("fa_custom", "sa")
@@ -249,70 +228,52 @@ class WaveBackend:
                 "cfg_parallel_degree": 1,
                 "attention_backend": sgl_attn,
                 "dit_cpu_offload": False,
-                # serving keeps T5 resident (avoid reloading it from CPU per request);
-                # one-shot can offload it (single encode).
                 "text_encoder_cpu_offload": not self.cfg.serve,
                 "enable_torch_compile": self.cfg.compile,
-                # WaveRT wants each rank to hold a FULL replica of every model.
-                # FSDP inference-sharding would (a) shard weights across the world
-                # and (b) build an init_device_mesh whose product must equal the
-                # world size -> crashes with num_gpus=1 on a >1-rank world.  Force
-                # the plain (non-FSDP) loader path instead.
+                # Every WaveRT rank owns a complete model replica.
                 "use_fsdp_inference": False,
             }
         )
-        # hsdp_shard_dim is forced to num_gpus in __post_init__; clear it so the
-        # T5/bridge loader's "hsdp_shard_dim is not None" FSDP trigger is skipped.
+        # Avoid the loader's HSDP path on the replicated WaveRT world.
         server_args.hsdp_shard_dim = None
-        # override RF checkpoint (path lives on the pipeline_config)
         server_args.pipeline_config.rolling_forcing_checkpoint_path = self.cfg.gen_ckpt
         server_args.pipeline_config.rolling_forcing_use_ema = True
-        # System-level scaling test: build a LARGER random-init DiT and skip the RF
-        # overlay (no checkpoint exists at that scale).  Must patch the loader BEFORE
-        # build_pipeline; point the RF path at a missing file so the overlay is
-        # skipped cleanly (initialize_pipeline falls back to base weights).
         if self.cfg.dit_scale not in (None, "1.3b"):
-            from wave_rt.dummy_model import install as install_dummy_dit
+            from wave_rt.runtime.dummy_model import install as install_dummy_dit
+
             install_dummy_dit(self.cfg.dit_scale, verbose=(self.rank == 0))
             server_args.pipeline_config.rolling_forcing_checkpoint_path = (
                 "/nonexistent/wave_dummy_skip_rf.pt"
             )
             if self.rank == 0:
-                print(f"[backend] DUMMY DiT scale={self.cfg.dit_scale} "
-                      f"(random init, RF overlay skipped)", flush=True)
-        # CRITICAL: force the DMD schedule to match the loaded checkpoint.  sglang's
-        # RollingForcingWanT2V480PConfig ships a WRONG 5-step [1000,800,600,400,200]
-        # default, but longvideo.pt is a 4-step DMD [1000,750,500,250] (see
-        # Causal-Forcing/long_video/configs/rolling_forcing_dmd.yaml).  Running the
-        # wrong step count/values on the 4-step checkpoint is off-distribution.
-        # sgl warps these identically to the real pipeline (timesteps[1000-steps]),
-        # so overriding here reproduces naive's exact schedule.
-        server_args.pipeline_config.dmd_denoising_steps = list(self.cfg.denoising_step_list)
+                print(
+                    f"[backend] DUMMY DiT scale={self.cfg.dit_scale} "
+                    f"(random init, RF overlay skipped)",
+                    flush=True,
+                )
+        # The checkpoint schedule is authoritative; SGLang's default differs.
+        server_args.pipeline_config.dmd_denoising_steps = list(
+            self.cfg.denoising_step_list
+        )
         server_args.pipeline_config.warp_denoising_step = True
         set_global_server_args(server_args)
         self.server_args = server_args
 
-        # WaveRT owns distribution the SAME way naive does: ONE bare NCCL process
-        # group (which doubles as the wavefront comm) + a degree-1 identity shim for
-        # sglang's parallel_state.  We deliberately do NOT call
-        # maybe_init_distributed_environment_and_model_parallel -- that builds ~6
-        # GroupCoordinators (gloo groups always + pynccl + srt custom-allreduce for
-        # world>1) whose cross-process shared resources contend on one node.  The shim
-        # (dist_compat._install_sgl_shim) points _WORLD/_TP/_SP/_CFG/_VAE_DECODE at a
-        # size-1 coordinator and leaves _DP/_PP None, so the model does zero collective
-        # comm and the default WORLD PG is free for the wavefront's raw collectives.
-        # Must run BEFORE build_pipeline: linear __init__ reads get_tp_group() (_TP).
-        #
-        # WAVE_DIST_MODE=sgl reverts to sglang's GroupCoordinator path (A/B baseline
-        # for the feasibility report); default "shim" is the naive-style bare NCCL.
+        # The shim leaves WORLD to WaveRT and gives SGLang degree-1 model groups.
         dist_mode = os.environ.get("WAVE_DIST_MODE", "shim")
         if dist_mode == "sgl":
             from sglang.multimodal_gen.runtime.distributed.parallel_state import (
                 maybe_init_distributed_environment_and_model_parallel,
             )
+
             maybe_init_distributed_environment_and_model_parallel(
-                tp_size=1, sp_size=1, cfg_degree=1, ulysses_degree=1,
-                ring_degree=1, dp_size=self.world, dist_timeout=180,
+                tp_size=1,
+                sp_size=1,
+                cfg_degree=1,
+                ulysses_degree=1,
+                ring_degree=1,
+                dp_size=self.world,
+                dist_timeout=180,
             )
             if self.rank == 0:
                 print("[backend] dist mode = sgl (GroupCoordinator)", flush=True)
@@ -327,9 +288,7 @@ class WaveBackend:
             if self.rank == 0:
                 print("[backend] dist mode = shim (bare NCCL)", flush=True)
 
-        # No-op the pipeline's per-rank transformer-config patch/restore (the
-        # launcher pre-patched the shared file once); avoids the wp_size-way
-        # read-modify-write race that crashed a rank and hung the rest.
+        # The launcher patches the shared transformer config before workers spawn.
         disable_rf_config_patch()
 
         self.pipeline = build_pipeline(server_args)
@@ -337,16 +296,14 @@ class WaveBackend:
         self.vae = self.pipeline.get_module("vae")
         self.scheduler = self.pipeline.get_module("scheduler")
 
-        # tag each self-attention module with its layer index for the closure
         for i, block in enumerate(self.transformer.blocks):
             block.attn1._wave_layer_idx = i
         self.num_layers = len(self.transformer.blocks)
 
-        # Optional post-load FP8 (W8A8) quantization of the DiT block linears.
-        # Done AFTER the bf16 build + RF overlay (sglang's load-time --quantization
-        # path is incompatible with the RF load_state_dict; see wave_rt/fp8_linear).
+        # RF weights must load before linears are replaced with FP8 modules.
         if self.cfg.quantization == "fp8":
-            from wave_rt.fp8_linear import quantize_transformer_fp8
+            from wave_rt.runtime.fp8 import quantize_transformer_fp8
+
             nq = quantize_transformer_fp8(self.transformer, verbose=(self.rank == 0))
             if self.rank == 0:
                 print(f"[backend] FP8 W8A8: {nq} linears quantized", flush=True)
@@ -360,13 +317,11 @@ class WaveBackend:
         self.num_attention_heads = self.transformer.config.num_attention_heads
         self.attention_head_dim = self.transformer.config.attention_head_dim
 
-        # reuse the pipeline's own stage instances
         self.rf_stage = self.pipeline.stages[3]
         self.decode_stage = self.pipeline.stages[4]
 
         self._prepare_conditioning()
 
-        # the wavefront needs one denoise rank per DMD step
         n_steps = int(self.dsl.numel())
         if self.cfg.wp_size > 1 and n_steps != self.cfg.rf_step:
             raise ValueError(
@@ -382,7 +337,7 @@ class WaveBackend:
                 f"dsl={self.dsl.tolist()}",
                 flush=True,
             )
-        if os.environ.get("WAVE_DEBUG", "") not in ("", "0", "false"):
+        if env_flag("WAVE_DEBUG"):
             print(f"[wrt-dbg r{self.rank}] backend.init DONE", flush=True)
 
     def _assert_single_card_degrees(self) -> None:
@@ -409,12 +364,21 @@ class WaveBackend:
         """Init-time conditioning with the config defaults (also warms up + validates
         the DMD schedule).  Per-request serving re-runs prepare_request() directly."""
         self.prepare_request(
-            self.cfg.prompt, self.cfg.seed, self.cfg.num_frames,
-            self.cfg.height, self.cfg.width,
+            self.cfg.prompt,
+            self.cfg.seed,
+            self.cfg.num_frames,
+            self.cfg.height,
+            self.cfg.width,
         )
 
-    def prepare_request(self, prompt: str, seed: int, num_frames: int,
-                        height: int | None = None, width: int | None = None) -> None:
+    def prepare_request(
+        self,
+        prompt: str,
+        seed: int,
+        num_frames: int,
+        height: int | None = None,
+        width: int | None = None,
+    ) -> None:
         """Per-request conditioning: run the pipeline prefix (InputValidation ->
         Text encode -> LatentPrep) for this prompt/seed/shape, build the RF forward
         context, and (re)allocate the kv/crossattn caches.  Re-running resets those
@@ -426,7 +390,11 @@ class WaveBackend:
         w = width if width is not None else self.cfg.width
         sp_cls = type(self.pipeline).sampling_params_cls
         sampling_params = sp_cls(
-            prompt=prompt, num_frames=num_frames, height=h, width=w, seed=seed,
+            prompt=prompt,
+            num_frames=num_frames,
+            height=h,
+            width=w,
+            seed=seed,
         )
         batch = Req(sampling_params=sampling_params)
 

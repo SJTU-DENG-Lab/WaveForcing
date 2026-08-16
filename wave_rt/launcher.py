@@ -1,8 +1,4 @@
-"""WaveRT launcher: bring up ``wp_size`` worker processes (one GPU each) that
-together form the systolic wavefront.  Each worker owns exactly one CUDA device
-and runs sglang with all parallel degrees == 1 (zero collective comm inside the
-model); WaveRT itself owns the NCCL world used by the wavefront.
-"""
+"""Process launcher for WaveRT diffusion and streaming VAE ranks."""
 
 from __future__ import annotations
 
@@ -17,20 +13,16 @@ from wave_rt.config import WaveConfig
 
 
 def _worker(rank: int, cfg: WaveConfig, q=None, meta_q=None, req_q=None) -> None:
-    # Imported inside the worker so any import error is attributed per-process
-    # and after CUDA_VISIBLE_DEVICES / device selection is in effect.
-    from wave_rt.backend import WaveBackend
-    from wave_rt.wavefront import WaveDenoiser
+    # Worker imports must happen after CUDA visibility is configured.
+    from wave_rt.denoiser import WaveDenoiser
+    from wave_rt.runtime.backend import WaveBackend
 
     backend = WaveBackend(cfg, rank)
     try:
-        backend.init()  # load once (build_pipeline + one warm prepare via cfg defaults)
+        backend.init()
         if req_q is None:
-            # one-shot: single generation with the config's prompt/seed/frames.
             WaveDenoiser(backend, cfg, q=q, meta_q=meta_q).run()
         else:
-            # serving: resident loop -- re-prepare per request, no model reload,
-            # no per-request warmup (the startup dummy generation warmed everything).
             while True:
                 req = req_q.get()
                 if req is None:
@@ -46,7 +38,6 @@ def _worker(rank: int, cfg: WaveConfig, q=None, meta_q=None, req_q=None) -> None
                 WaveDenoiser(backend, cfg, q=q, meta_q=meta_q).run(
                     out_dir=req.get("out"), warmup=False, save=not is_warmup)
     except Exception:
-        import os
         import traceback
 
         dbg_dir = os.environ.get("WAVE_DEBUG_DIR", "/tmp/wrt_dbg")
@@ -63,9 +54,7 @@ def _worker(rank: int, cfg: WaveConfig, q=None, meta_q=None, req_q=None) -> None
 
 
 def _aggregate_metrics(cfg: WaveConfig, out_dir: str, meta_q) -> None:
-    """Combine store-rank (diffusion) + last-VAE-stage timings into metrics.json
-    (t_start/t_end from time.perf_counter are CLOCK_MONOTONIC -> comparable across
-    procs on the same host)."""
+    """Combine diffusion and VAE worker timings into the run metrics."""
     meta = {}
     while not meta_q.empty():
         it = meta_q.get()
@@ -103,11 +92,8 @@ def _aggregate_metrics(cfg: WaveConfig, out_dir: str, meta_q) -> None:
 
 
 def _serve(cfg: WaveConfig) -> None:
-    """Resident serving: load the model once, then process an HTTP-fed FIFO job
-    queue -- clients POST /generate concurrently (accepted + queued instantly), a
-    single dispatcher thread runs them one at a time (the wavefront owns all GPUs)."""
+    """Serve queued generation requests with resident worker processes."""
     import itertools
-    import os
     import queue as _queue
     import threading
 
@@ -118,11 +104,11 @@ def _serve(cfg: WaveConfig) -> None:
         raise SystemExit("[wave_rt] --serve requires --vae-stages > 0 (streaming VAE)")
 
     n_diff, n_vae = cfg.wp_size, cfg.vae_stages
-    req_qs = [mp.Queue() for _ in range(n_diff + n_vae)]  # one per worker (broadcast target)
-    q = mp.Queue(maxsize=64)     # diffusion store -> VAE stage0 chunk stream
-    meta_q = mp.Queue()          # per-request (diff, vae) timing back to the dispatcher
+    req_qs = [mp.Queue() for _ in range(n_diff + n_vae)]
+    q = mp.Queue(maxsize=64)
+    meta_q = mp.Queue()
 
-    from wave_rt.vae import vae_stage
+    from wave_rt.pipelines.vae import vae_stage
     procs = [mp.Process(target=_worker, args=(r, cfg, q, meta_q, req_qs[r]))
              for r in range(n_diff)]
     for g in range(n_vae):
@@ -145,9 +131,6 @@ def _serve(cfg: WaveConfig) -> None:
         return meta
 
     def dispatcher():
-        # One-time startup warmup: a full dummy generation through the real path so
-        # steady-state full-window kernels/NCCL/VAE (+ compile if on) are hot before
-        # any client request.  Output discarded (out=None, save=False).
         print(f"[wave_rt] warmup: dummy full-window generation "
               f"({cfg.warmup_frames} frames)...", flush=True)
         t_w = time.perf_counter()
@@ -187,7 +170,7 @@ def _serve(cfg: WaveConfig) -> None:
     _srv = {}
 
     @app.post("/generate")
-    def generate(body: dict):  # sync -> FastAPI threadpool; blocking wait is safe here
+    def generate(body: dict):
         nf = int(body.get("num_frames", cfg.num_frames))
         if nf % cfg.num_frames_per_block != 0:
             return {"error": f"num_frames must be divisible by {cfg.num_frames_per_block}"}
@@ -200,8 +183,8 @@ def _serve(cfg: WaveConfig) -> None:
             "height": body.get("height"), "width": body.get("width"),
         }
         job = {"req": req, "event": threading.Event(), "result": None}
-        job_queue.put(job)         # instant accept -> FIFO queue
-        job["event"].wait()        # this client waits for its own result
+        job_queue.put(job)
+        job["event"].wait()
         return job["result"]
 
     @app.get("/status")
@@ -219,14 +202,13 @@ def _serve(cfg: WaveConfig) -> None:
     print(f"[wave_rt] serving on http://{cfg.serve_host}:{cfg.serve_port} "
           f"(POST /generate | GET /status | POST /shutdown); model loading in workers...",
           flush=True)
-    server.run()  # blocks until /shutdown sets should_exit
+    server.run()
 
-    job_queue.put(_SHUTDOWN)       # dispatcher broadcasts None -> workers exit
+    job_queue.put(_SHUTDOWN)
     disp.join(timeout=60)
     for p in procs:
         p.join(timeout=120)
-    # A worker stuck in a NCCL collective ignores SIGTERM and would orphan (pinning
-    # its GPU + the serve port on the next launch), so escalate to SIGKILL.
+    # Escalate if a worker is still trapped in a collective after SIGTERM.
     for p in procs:
         if p.is_alive():
             p.terminate()
@@ -237,45 +219,45 @@ def _serve(cfg: WaveConfig) -> None:
     print("[wave_rt] serving stopped.", flush=True)
 
 
-def launch(cfg: WaveConfig) -> None:
+def _configure_environment(cfg: WaveConfig) -> None:
     if cfg.cuda_visible_devices is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = cfg.cuda_visible_devices
-    # Cap CPU threads per rank.  torch defaults intra-op threads to the physical
-    # core count; with wp_size processes each spinning ~ncores OMP threads that is
-    # a massive oversubscription (e.g. 6 x 128 = 768 busy-wait threads on 128
-    # cores) that CRUSHES the launch-bound sgl DiT forward -- measured 1050ms vs
-    # 180ms/forward, tick 760ms vs 148ms.  So we DEFAULT to an even split of cores
-    # across ranks (capped at 16; beyond that these small ops don't benefit and OMP
-    # busy-wait only hurts).  Override with WAVE_THREADS=N (N=0 disables the cap).
-    import os as _os
-    _wt = _os.environ.get("WAVE_THREADS", "")
-    if _wt == "":
+
+    wave_threads = os.environ.get("WAVE_THREADS", "")
+    if not wave_threads:
         try:
-            _ncores = len(_os.sched_getaffinity(0))
+            core_count = len(os.sched_getaffinity(0))
         except Exception:
-            _ncores = _os.cpu_count() or cfg.wp_size
-        _wt = str(max(1, min(16, _ncores // max(1, cfg.n_total_gpus))))
-        os.environ["WAVE_THREADS"] = _wt  # propagate to spawned workers (backend reads it)
-        print(f"[wave_rt] WAVE_THREADS defaulted to {_wt} "
-              f"({_ncores} cores / {cfg.n_total_gpus} procs)", flush=True)
-    if _wt not in ("", "0"):
-        for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
-                   "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-            os.environ.setdefault(_v, _wt)
+            core_count = os.cpu_count() or cfg.wp_size
+        wave_threads = str(
+            max(1, min(16, core_count // max(1, cfg.n_total_gpus)))
+        )
+        os.environ["WAVE_THREADS"] = wave_threads
+        print(
+            f"[wave_rt] WAVE_THREADS defaulted to {wave_threads} "
+            f"({core_count} cores / {cfg.n_total_gpus} procs)",
+            flush=True,
+        )
+    if wave_threads not in ("", "0"):
+        thread_vars = (
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        )
+        for name in thread_vars:
+            os.environ.setdefault(name, wave_threads)
+
     os.environ.setdefault("MASTER_ADDR", cfg.master_addr)
     os.environ.setdefault("MASTER_PORT", str(cfg.master_port))
-    # Tokenizers fork-safety + deterministic-ish cuBLAS are nice-to-haves.
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    # Disable the RunAI model streamer: its find_local_ranks() does a distributed
-    # all_gather_object over the WORLD group during weight load.  With the extra VAE
-    # procs contending at startup, one diffusion rank reaches that load-time
-    # rendezvous late -> TCPStore timeout -> crash cascade.  wrt loads a full replica
-    # per rank, so RunAI's cross-rank coordination is pointless; the plain safetensors
-    # loader avoids the rendezvous entirely.
+    # Full replicas do not need RunAI's load-time WORLD rendezvous.
     os.environ.setdefault("SGLANG_USE_RUNAI_MODEL_STREAMER", "0")
-    # Make the NCCL watchdog abort a hung collective (see backend dist_timeout)
-    # so a wavefront deadlock tears the process down instead of pinning GPUs.
     os.environ.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
+
+
+def launch(cfg: WaveConfig) -> None:
+    _configure_environment(cfg)
 
     print(
         f"[wave_rt] launching {cfg.wp_size} diffusion + {cfg.vae_stages} VAE ranks "
@@ -290,10 +272,9 @@ def launch(cfg: WaveConfig) -> None:
                 f"[wave_rt] need {cfg.n_total_gpus} GPUs (diffusion {cfg.wp_size} + "
                 f"vae {cfg.vae_stages}) but only {ndev} visible. Lower --wp-size / --vae-stages."
             )
-    # Pre-patch the shared transformer config ONCE (single process) so the
-    # wp_size ranks don't race read-modify-writing it during load.
+    # Patch the shared file once, before workers can race on it.
     try:
-        from wave_rt.dist_compat import ensure_causal_transformer_config
+        from wave_rt.distributed.compat import ensure_causal_transformer_config
         ensure_causal_transformer_config(cfg.model_path)
     except Exception as e:
         print(f"[wave_rt] config pre-patch skipped: {e!r}", flush=True)
@@ -307,9 +288,6 @@ def launch(cfg: WaveConfig) -> None:
         _serve(cfg)
         return
 
-    # Diffusion procs (wp_size) + optional streaming VAE procs (vae_stages), sharing
-    # an mp.Queue bridge + meta_q for timing.  Two DISJOINT NCCL worlds (diffusion:
-    # master_port; VAE: vae_port) linked only by the CPU queue -> no in-job NCCL mix.
     streaming = cfg.vae_stages > 0
     q = mp.Queue(maxsize=64) if streaming else None
     meta_q = mp.Queue() if streaming else None
@@ -318,7 +296,7 @@ def launch(cfg: WaveConfig) -> None:
     procs = [mp.Process(target=_worker, args=(r, cfg, q, meta_q))
              for r in range(cfg.wp_size)]
     if streaming:
-        from wave_rt.vae import vae_stage
+        from wave_rt.pipelines.vae import vae_stage
         for g in range(cfg.vae_stages):
             procs.append(mp.Process(
                 target=vae_stage,

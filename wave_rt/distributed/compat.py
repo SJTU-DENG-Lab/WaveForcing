@@ -187,5 +187,3 @@ def patch_group_coordinator_lightweight() -> None:
 
     gc.GroupCoordinator.__init__ = light_init
     gc.GroupCoordinator._wave_lightweight = True
-
-

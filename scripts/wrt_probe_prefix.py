@@ -11,7 +11,7 @@ We drive backend.forward_chunk with a synthetic exchange closure that returns a
 KV context of exactly K chunks (K-1 "prefix" + current), tiled from the current
 layer's own roped K/V -- so klen = K * tokens_per_chunk is controlled precisely
 and the sgl attention-sink cache path is bypassed (same code path the wavefront
-uses).  Attention backend is toggled at runtime via wave_rt.backend's _WAVE_STATE.
+uses). Attention backend is toggled through ``wave_rt.runtime.backend``.
 
 Run:
   cd /path/to/WaveParallel
@@ -28,8 +28,12 @@ import torch
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--chunks", type=str, default="1,2,3,4,5,6,7,8",
-                    help="KV context sizes in chunks (K=1 -> current only)")
+    ap.add_argument(
+        "--chunks",
+        type=str,
+        default="1,2,3,4,5,6,7,8",
+        help="KV context sizes in chunks (K=1 -> current only)",
+    )
     ap.add_argument("--backends", type=str, default="torch_sdpa,fa_custom,sa")
     ap.add_argument("--iters", type=int, default=8)
     ap.add_argument("--warmup", type=int, default=3)
@@ -39,16 +43,18 @@ def main() -> None:
     os.environ.setdefault("MASTER_PORT", "29731")
 
     from wave_rt.config import WaveConfig
-    from wave_rt import backend as be_mod
-    from wave_rt.backend import WaveBackend
+    from wave_rt.runtime import backend as be_mod
+    from wave_rt.runtime.backend import WaveBackend
 
     cfg = WaveConfig(rf_step=0, wp_size=1, num_frames=3, height=480, width=832, seed=0)
     be = WaveBackend(cfg, rank=0)
     t0 = time.perf_counter()
     be.init()
-    print(f"[probe] backend.init OK in {time.perf_counter()-t0:.1f}s "
-          f"({be.num_layers} layers, klen unit = {be.num_token_per_frame * cfg.num_frames_per_block} tok/chunk)",
-          flush=True)
+    print(
+        f"[probe] backend.init OK in {time.perf_counter() - t0:.1f}s "
+        f"({be.num_layers} layers, klen unit = {be.num_token_per_frame * cfg.num_frames_per_block} tok/chunk)",
+        flush=True,
+    )
 
     npb = cfg.num_frames_per_block
     noise = be.full_noise_bcthw[:, :, 0:npb].contiguous()
@@ -74,12 +80,26 @@ def main() -> None:
 
     def make_exch(K: int):
         """Return a KV context of exactly K chunks tiled from the current K/V."""
-        def exch(*, layer_idx, roped_query, roped_key, unroped_key, value,
-                 current_start, tokens_per_frame, post_patch_height,
-                 post_patch_width, dim, rope_num_heads, num_frames_per_block):
+
+        def exch(
+            *,
+            layer_idx,
+            roped_query,
+            roped_key,
+            unroped_key,
+            value,
+            current_start,
+            tokens_per_frame,
+            post_patch_height,
+            post_patch_width,
+            dim,
+            rope_num_heads,
+            num_frames_per_block,
+        ):
             ctx_k = roped_key if K == 1 else torch.cat([roped_key] * K, dim=1)
             ctx_v = value if K == 1 else torch.cat([value] * K, dim=1)
             return ctx_k, ctx_v
+
         return exch
 
     def timed_forward(K: int, iters: int, warmup: int) -> float:
@@ -102,11 +122,17 @@ def main() -> None:
         for K in Ks:
             ms = timed_forward(K, args.iters, args.warmup)
             results[bk][K] = ms
-            print(f"[probe] backend={bk:10s} K={K} (klen={K*npb*be.num_token_per_frame}) "
-                  f"-> {ms:.1f} ms/forward", flush=True)
+            print(
+                f"[probe] backend={bk:10s} K={K} (klen={K * npb * be.num_token_per_frame}) "
+                f"-> {ms:.1f} ms/forward",
+                flush=True,
+            )
 
     # summary table
-    print("\n=== sgl single-chunk forward latency (ms) vs KV context (chunks) ===", flush=True)
+    print(
+        "\n=== sgl single-chunk forward latency (ms) vs KV context (chunks) ===",
+        flush=True,
+    )
     hdr = "backend    " + "".join(f"K={k:<7d}" for k in Ks)
     print(hdr, flush=True)
     for bk, row in results.items():
@@ -116,8 +142,11 @@ def main() -> None:
     for bk, row in results.items():
         if len(Ks) >= 2:
             slope = (row[Ks[-1]] - row[Ks[0]]) / (Ks[-1] - Ks[0])
-            print(f"[probe] {bk}: base(K={Ks[0]})={row[Ks[0]]:.1f}ms, "
-                  f"K={Ks[-1]}={row[Ks[-1]]:.1f}ms, +{slope:.1f}ms/chunk", flush=True)
+            print(
+                f"[probe] {bk}: base(K={Ks[0]})={row[Ks[0]]:.1f}ms, "
+                f"K={Ks[-1]}={row[Ks[-1]]:.1f}ms, +{slope:.1f}ms/chunk",
+                flush=True,
+            )
 
     be.shutdown()
     print("[probe] DONE", flush=True)

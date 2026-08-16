@@ -10,12 +10,16 @@ beyond Gate B, cross-process (faithful to the torch.distributed multi-proc run).
 Layout: proc0 = producer (GPU0), proc1 = consumer (GPU1).
 Consumer allocs remote_kv + gen_flag, IPC-exports; producer writes into them.
 """
-import os, sys, time
+
+import os
+import sys
+import time
+
 import torch
 import torch.multiprocessing as mp
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from wave_rt import p2p_mem as p2p
+from wave_rt.distributed import ipc as p2p
 
 # Config M unit: KV_SHAPE = (2, tokens_per_chunk, H, D) bf16
 KV_SHAPE = (2, 4680, 16, 128)
@@ -32,11 +36,15 @@ def consumer(q_to_prod, q_to_cons, dev=1):
     kv_h = p2p.ipc_get_handle_bytes(remote_kv.data_ptr())
     fl_h = p2p.ipc_get_handle_bytes(gen_flag.data_ptr())
     # base offsets so producer can rebase to the exact slot pointer
-    q_to_prod.put({
-        "kv_handle": kv_h, "kv_base": remote_kv.data_ptr(),
-        "fl_handle": fl_h, "fl_base": gen_flag.data_ptr(),
-        "nbytes": NBYTES,
-    })
+    q_to_prod.put(
+        {
+            "kv_handle": kv_h,
+            "kv_base": remote_kv.data_ptr(),
+            "fl_handle": fl_h,
+            "fl_base": gen_flag.data_ptr(),
+            "nbytes": NBYTES,
+        }
+    )
 
     s_cmp = torch.cuda.Stream(device=dev)
     results = []
@@ -57,12 +65,17 @@ def consumer(q_to_prod, q_to_cons, dev=1):
         q_to_prod.put(("done", k, ok))
     n_ok = sum(1 for _, ok, _, _ in results if ok)
     q_to_prod.put(("SUMMARY", n_ok, ITERS))
-    print(f"[consumer] release/acquire correctness: {n_ok}/{ITERS} generations "
-          f"had payload-visible-after-flag", flush=True)
+    print(
+        f"[consumer] release/acquire correctness: {n_ok}/{ITERS} generations "
+        f"had payload-visible-after-flag",
+        flush=True,
+    )
     if n_ok != ITERS:
         for k, ok, got, exp in results:
             if not ok:
-                print(f"  [consumer] FAIL gen {k}: got {got} expected {exp}", flush=True)
+                print(
+                    f"  [consumer] FAIL gen {k}: got {got} expected {exp}", flush=True
+                )
 
 
 def producer(q_to_prod, q_to_cons, dev=0, peer=1):
@@ -85,8 +98,9 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
     nbytes = info["nbytes"]
 
     def peer_copy(stream):
-        p2p.memcpy_peer_async(kv_base_peer, ctx_peer, src.data_ptr(), ctx_self,
-                              nbytes, stream)
+        p2p.memcpy_peer_async(
+            kv_base_peer, ctx_peer, src.data_ptr(), ctx_self, nbytes, stream
+        )
 
     def dtod_copy(stream):
         p2p.memcpy_dtod_async(kv_base_self, src.data_ptr(), nbytes, stream)
@@ -108,8 +122,11 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
     dt = time.perf_counter() - t0
     gbps = (BW_N * nbytes) / dt / 1e9
     per_copy_ms = dt / BW_N * 1e3
-    print(f"[producer] (2) peer copy: {gbps:.1f} GB/s, {per_copy_ms:.3f} ms/unit "
-          f"({nbytes/2**20:.2f} MiB)", flush=True)
+    print(
+        f"[producer] (2) peer copy: {gbps:.1f} GB/s, {per_copy_ms:.3f} ms/unit "
+        f"({nbytes / 2**20:.2f} MiB)",
+        flush=True,
+    )
 
     # (2b) IPC-DtoD (dst opened under self ctx, peer-mapped): bandwidth
     for _ in range(warm):
@@ -120,8 +137,11 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
         dtod_copy(s_copy.cuda_stream)
     s_copy.synchronize()
     dt = time.perf_counter() - t0
-    print(f"[producer] (2b) IPC DtoD copy: {BW_N*nbytes/dt/1e9:.1f} GB/s, "
-          f"{dt/BW_N*1e3:.3f} ms/unit", flush=True)
+    print(
+        f"[producer] (2b) IPC DtoD copy: {BW_N * nbytes / dt / 1e9:.1f} GB/s, "
+        f"{dt / BW_N * 1e3:.3f} ms/unit",
+        flush=True,
+    )
 
     # ---- (3) release/acquire: write pattern=k, copy, set flag=k ----
     for k in range(1, ITERS + 1):
@@ -134,7 +154,7 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
         peer_copy(s_copy.cuda_stream)
         # release AFTER the copy on the same stream
         p2p.stream_write_u32(s_copy.cuda_stream, fl_base_self, k)
-        tag = q_to_prod.get()  # wait for consumer "done"
+        q_to_prod.get()  # wait for consumer "done"
     summary = q_to_prod.get()
     print(f"[producer] (3) consumer summary: {summary}", flush=True)
 
@@ -153,7 +173,7 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
         with torch.cuda.stream(s_cmp):
             ev0.record(s_cmp)
             for _ in range(rounds):
-                c = a @ b
+                _ = a @ b
             ev1.record(s_cmp)
         s_cmp.synchronize()
         return ev0.elapsed_time(ev1)
@@ -169,8 +189,11 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
     conc = time_matmul(200)  # matmul kernel time while copies run on s_copy
     s_copy.synchronize()
     slow = (conc - iso) / iso * 100
-    print(f"[producer] (4-flood peerAsync) matmul iso={iso:.2f}ms under-copy={conc:.2f}ms "
-          f"-> {slow:+.1f}% (target <4%)", flush=True)
+    print(
+        f"[producer] (4-flood peerAsync) matmul iso={iso:.2f}ms under-copy={conc:.2f}ms "
+        f"-> {slow:+.1f}% (target <4%)",
+        flush=True,
+    )
 
     # DtoD flood SM impact (event-based, clean)
     torch.cuda.synchronize()
@@ -180,8 +203,11 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
     conc_d = time_matmul(200)
     s_copy.synchronize()
     slow_d = (conc_d - iso) / iso * 100
-    print(f"[producer] (4-flood DtoD) matmul iso={iso:.2f}ms under-copy={conc_d:.2f}ms "
-          f"-> {slow_d:+.1f}%", flush=True)
+    print(
+        f"[producer] (4-flood DtoD) matmul iso={iso:.2f}ms under-copy={conc_d:.2f}ms "
+        f"-> {slow_d:+.1f}%",
+        flush=True,
+    )
 
     # realistic ratio: 4 peer copies (nearest-first fanout) overlapping one
     # attention-sized compute chunk
@@ -193,13 +219,17 @@ def producer(q_to_prod, q_to_cons, dev=0, peer=1):
     s_copy.synchronize()
     iso30 = min(time_matmul(30) for _ in range(3))
     slow_r = (real - iso30) / iso30 * 100
-    print(f"[producer] (4-real 4copies) matmul iso={iso30:.2f}ms "
-          f"under-copy={real:.2f}ms -> {slow_r:+.1f}%", flush=True)
+    print(
+        f"[producer] (4-real 4copies) matmul iso={iso30:.2f}ms "
+        f"under-copy={real:.2f}ms -> {slow_r:+.1f}%",
+        flush=True,
+    )
     verdict = "PASS" if slow < 4.0 else ("MARGINAL" if slow < 8 else "FAIL")
     print(f"[producer] (4) SM-contention verdict (flood): {verdict}", flush=True)
 
     p2p.ipc_close_handle(kv_base_peer)
-    p2p.ipc_close_handle(fl_base_self); p2p.ipc_close_handle(kv_base_self)
+    p2p.ipc_close_handle(fl_base_self)
+    p2p.ipc_close_handle(kv_base_self)
 
 
 def main():
@@ -208,8 +238,10 @@ def main():
     q_to_cons = mp.Queue()
     pc = mp.Process(target=consumer, args=(q_to_prod, q_to_cons, 1))
     pp = mp.Process(target=producer, args=(q_to_prod, q_to_cons, 0, 1))
-    pc.start(); pp.start()
-    pp.join(); pc.join()
+    pc.start()
+    pp.start()
+    pp.join()
+    pc.join()
 
 
 if __name__ == "__main__":

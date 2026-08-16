@@ -30,16 +30,20 @@ def main() -> None:
     os.environ.setdefault("MASTER_PORT", "29699")
 
     from wave_rt.config import WaveConfig
-    from wave_rt.backend import WaveBackend
+    from wave_rt.runtime.backend import WaveBackend
 
     cfg = WaveConfig(
-        rf_step=0, wp_size=1,  # single process
-        num_frames=args.num_frames, height=args.height, width=args.width, seed=0,
+        rf_step=0,
+        wp_size=1,  # single process
+        num_frames=args.num_frames,
+        height=args.height,
+        width=args.width,
+        seed=0,
     )
     be = WaveBackend(cfg, rank=0)
     t0 = time.perf_counter()
     be.init()
-    print(f"[smoke] backend.init OK in {time.perf_counter()-t0:.1f}s", flush=True)
+    print(f"[smoke] backend.init OK in {time.perf_counter() - t0:.1f}s", flush=True)
 
     npb = cfg.num_frames_per_block
     noise = be.full_noise_bcthw  # (B, C, nf, H, W)
@@ -53,7 +57,7 @@ def main() -> None:
     torch.cuda.synchronize()
     print(
         f"[smoke] forward_chunk OK -> x0 {tuple(x0.shape)} in "
-        f"{time.perf_counter()-t1:.2f}s (mean={x0.float().mean():.4f}, "
+        f"{time.perf_counter() - t1:.2f}s (mean={x0.float().mean():.4f}, "
         f"nan={torch.isnan(x0).any().item()})",
         flush=True,
     )
@@ -66,7 +70,7 @@ def main() -> None:
         torch.cuda.synchronize()
         print(
             f"[smoke] decode OK -> {tuple(vid.shape)} in "
-            f"{time.perf_counter()-t2:.2f}s",
+            f"{time.perf_counter() - t2:.2f}s",
             flush=True,
         )
 
