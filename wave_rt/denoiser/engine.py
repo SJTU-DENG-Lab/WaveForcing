@@ -556,7 +556,11 @@ class WaveDenoiser(
         return final_latents, tick_ms, timeline
 
     def run(
-        self, out_dir: str | None = None, warmup: bool = True, save: bool = True
+        self,
+        out_dir: str | None = None,
+        warmup: bool = True,
+        save: bool = True,
+        request_id: str = "oneshot",
     ) -> None:
         be = self.be
         store_rank = self.store_rank
@@ -680,9 +684,19 @@ class WaveDenoiser(
                         flush=True,
                     )
                 if self.meta_q is not None:
-                    self.meta_q.put(
-                        ("diff", diffusion_ms, t_start, tick_ms, latents.shape[2])
-                    )
+                    from wave_rt.serving.protocol import EventKind, WorkerEvent
+
+                    self.meta_q.put(WorkerEvent(
+                        request_id=request_id,
+                        source="diffusion",
+                        kind=EventKind.PASSED,
+                        payload={
+                            "diffusion_ms": diffusion_ms,
+                            "started_monotonic_s": t_start,
+                            "tick_ms": tick_ms,
+                            "num_latent_frames": latents.shape[2],
+                        },
+                    ))
             else:
                 from wave_rt.pipelines.vae import finalize_on_store
 

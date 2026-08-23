@@ -16,27 +16,42 @@ def _worker(rank: int, cfg: WaveConfig, q=None, meta_q=None, req_q=None) -> None
     # Worker imports must happen after CUDA visibility is configured.
     from wave_rt.denoiser import WaveDenoiser
     from wave_rt.runtime.backend import WaveBackend
+    from wave_rt.serving.protocol import CommandKind, WorkerCommand
 
     backend = WaveBackend(cfg, rank)
     try:
         backend.init()
         if req_q is None:
-            WaveDenoiser(backend, cfg, q=q, meta_q=meta_q).run()
+            WaveDenoiser(backend, cfg, q=q, meta_q=meta_q).run(
+                request_id="oneshot"
+            )
         else:
             while True:
-                req = req_q.get()
-                if req is None:
+                command = req_q.get()
+                if not isinstance(command, WorkerCommand):
+                    raise TypeError(
+                        f"expected WorkerCommand, got {type(command).__name__}"
+                    )
+                if command.kind is CommandKind.SHUTDOWN:
                     break
-                cfg.prompt = req.get("prompt", cfg.prompt)
-                cfg.seed = int(req.get("seed", cfg.seed))
-                cfg.num_frames = int(req.get("num_frames", cfg.num_frames))
+                req = command.request
+                assert req is not None
+                cfg.prompt = req.prompt
+                cfg.seed = req.seed
+                cfg.num_frames = req.num_frames
                 backend.prepare_request(
-                    cfg.prompt, cfg.seed, cfg.num_frames,
-                    req.get("height"), req.get("width"),
+                    req.prompt,
+                    req.seed,
+                    req.num_frames,
+                    req.height,
+                    req.width,
                 )
-                is_warmup = bool(req.get("warmup"))
                 WaveDenoiser(backend, cfg, q=q, meta_q=meta_q).run(
-                    out_dir=req.get("out"), warmup=False, save=not is_warmup)
+                    out_dir=req.out_dir or None,
+                    warmup=False,
+                    save=not req.warmup,
+                    request_id=req.request_id,
+                )
     except Exception:
         import traceback
 
@@ -55,18 +70,33 @@ def _worker(rank: int, cfg: WaveConfig, q=None, meta_q=None, req_q=None) -> None
 
 def _aggregate_metrics(cfg: WaveConfig, out_dir: str, meta_q) -> None:
     """Combine diffusion and VAE worker timings into the run metrics."""
+    from wave_rt.serving.protocol import WorkerEvent
+
     meta = {}
     while not meta_q.empty():
         it = meta_q.get()
-        meta[it[0]] = it[1:]
-    diff = meta.get("diff")
+        if isinstance(it, WorkerEvent):
+            meta[it.source] = it.payload
+        else:
+            meta[it[0]] = it[1:]
+    diff = meta.get("diffusion") or meta.get("diff")
     vae = meta.get("vae")
-    diffusion_ms = diff[0] if diff else None
-    t_start = diff[1] if diff else None
-    tick_ms = diff[2] if diff else None
-    nlat = diff[3] if (diff and len(diff) > 3) else cfg.num_frames
-    vae_ms = vae[0] if vae else None
-    t_end = vae[1] if vae else None
+    if isinstance(diff, dict):
+        diffusion_ms = diff.get("diffusion_ms")
+        t_start = diff.get("started_monotonic_s")
+        tick_ms = diff.get("tick_ms")
+        nlat = diff.get("num_latent_frames", cfg.num_frames)
+    else:
+        diffusion_ms = diff[0] if diff else None
+        t_start = diff[1] if diff else None
+        tick_ms = diff[2] if diff else None
+        nlat = diff[3] if (diff and len(diff) > 3) else cfg.num_frames
+    if isinstance(vae, dict):
+        vae_ms = vae.get("vae_ms")
+        t_end = vae.get("completed_monotonic_s")
+    else:
+        vae_ms = vae[0] if vae else None
+        t_end = vae[1] if vae else None
     e2e_s = (t_end - t_start) if (t_start and t_end) else None
     lat_path = os.path.join(out_dir, "latents.pt")
     psnr = None
@@ -92,131 +122,19 @@ def _aggregate_metrics(cfg: WaveConfig, out_dir: str, meta_q) -> None:
 
 
 def _serve(cfg: WaveConfig) -> None:
-    """Serve queued generation requests with resident worker processes."""
-    import itertools
-    import queue as _queue
-    import threading
-
-    import uvicorn
-    from fastapi import FastAPI
-
-    if cfg.vae_stages <= 0:
-        raise SystemExit("[wave_rt] --serve requires --vae-stages > 0 (streaming VAE)")
-
-    n_diff, n_vae = cfg.wp_size, cfg.vae_stages
-    req_qs = [mp.Queue() for _ in range(n_diff + n_vae)]
-    q = mp.Queue(maxsize=64)
-    meta_q = mp.Queue()
-
+    """Run the resident WaveRT control plane."""
     from wave_rt.pipelines.vae import vae_stage
-    procs = [mp.Process(target=_worker, args=(r, cfg, q, meta_q, req_qs[r]))
-             for r in range(n_diff)]
-    for g in range(n_vae):
-        procs.append(mp.Process(
-            target=vae_stage, args=(g, n_diff + g, q, cfg, "", meta_q, req_qs[n_diff + g])))
-    for p in procs:
-        p.start()
+    from wave_rt.serving.http import require_http_dependencies, run_http_server
+    from wave_rt.serving.runtime import WaveServingRuntime
 
-    job_queue: _queue.Queue = _queue.Queue()
-    _SHUTDOWN = object()
-
-    def _dispatch_req(req):
-        """Broadcast one request to every worker, wait for its diff+vae timing."""
-        for rq in req_qs:
-            rq.put(req)
-        meta = {}
-        while not ("diff" in meta and "vae" in meta):
-            it = meta_q.get()
-            meta[it[0]] = it[1:]
-        return meta
-
-    def dispatcher():
-        print(f"[wave_rt] warmup: dummy full-window generation "
-              f"({cfg.warmup_frames} frames)...", flush=True)
-        t_w = time.perf_counter()
-        _dispatch_req({"prompt": cfg.prompt, "seed": 0,
-                       "num_frames": cfg.warmup_frames, "out": None, "warmup": True})
-        print(f"[wave_rt] warmup done in {time.perf_counter()-t_w:.1f}s; ready to serve",
-              flush=True)
-        while True:
-            job = job_queue.get()
-            if job is _SHUTDOWN:
-                for rq in req_qs:
-                    rq.put(None)
-                break
-            try:
-                meta = _dispatch_req(job["req"])
-                diff, vae = meta["diff"], meta["vae"]
-                diffusion_ms, t_start, _tick, nlat = diff[0], diff[1], diff[2], diff[3]
-                vae_ms, t_end = vae[0], vae[1]
-                e2e_s = (t_end - t_start) if (t_start and t_end) else None
-                job["result"] = {
-                    "video": os.path.join(job["req"]["out"], "video.mp4"),
-                    "num_output_frames": nlat,
-                    "diffusion_s": round(diffusion_ms / 1000.0, 3) if diffusion_ms else None,
-                    "vae_s": round(vae_ms / 1000.0, 3) if vae_ms else None,
-                    "end_to_end_s": round(e2e_s, 3) if e2e_s else None,
-                    "fps": round(nlat * 4 / e2e_s, 2) if e2e_s else None,
-                }
-            except Exception as e:
-                job["result"] = {"error": repr(e)}
-            job["event"].set()
-
-    disp = threading.Thread(target=dispatcher, daemon=True)
-    disp.start()
-
-    app = FastAPI()
-    _ids = itertools.count()
-    _srv = {}
-
-    @app.post("/generate")
-    def generate(body: dict):
-        nf = int(body.get("num_frames", cfg.num_frames))
-        if nf % cfg.num_frames_per_block != 0:
-            return {"error": f"num_frames must be divisible by {cfg.num_frames_per_block}"}
-        out = body.get("out") or os.path.join(cfg.out_root, "serve", f"job_{next(_ids)}")
-        os.makedirs(out, exist_ok=True)
-        req = {
-            "prompt": body.get("prompt", cfg.prompt),
-            "seed": int(body.get("seed", cfg.seed)),
-            "num_frames": nf, "out": out,
-            "height": body.get("height"), "width": body.get("width"),
-        }
-        job = {"req": req, "event": threading.Event(), "result": None}
-        job_queue.put(job)
-        job["event"].wait()
-        return job["result"]
-
-    @app.get("/status")
-    def status():
-        return {"pending": job_queue.qsize()}
-
-    @app.post("/shutdown")
-    def shutdown():
-        _srv["server"].should_exit = True
-        return {"ok": True}
-
-    server = uvicorn.Server(uvicorn.Config(
-        app, host=cfg.serve_host, port=cfg.serve_port, log_level="warning"))
-    _srv["server"] = server
-    print(f"[wave_rt] serving on http://{cfg.serve_host}:{cfg.serve_port} "
-          f"(POST /generate | GET /status | POST /shutdown); model loading in workers...",
-          flush=True)
-    server.run()
-
-    job_queue.put(_SHUTDOWN)
-    disp.join(timeout=60)
-    for p in procs:
-        p.join(timeout=120)
-    # Escalate if a worker is still trapped in a collective after SIGTERM.
-    for p in procs:
-        if p.is_alive():
-            p.terminate()
-    time.sleep(3)
-    for p in procs:
-        if p.is_alive():
-            p.kill()
-    print("[wave_rt] serving stopped.", flush=True)
+    require_http_dependencies()
+    runtime = WaveServingRuntime(cfg, _worker, vae_stage)
+    runtime.start()
+    try:
+        run_http_server(runtime, cfg)
+    finally:
+        runtime.shutdown(drain=True)
+    print("[wave_rt/serve] stopped", flush=True)
 
 
 def _configure_environment(cfg: WaveConfig) -> None:

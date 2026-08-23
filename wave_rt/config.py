@@ -64,6 +64,10 @@ class WaveConfig:
     serve_host: str = "127.0.0.1"
     serve_port: int = 8890
     warmup_frames: int = 24
+    serve_queue_size: int = 16
+    serve_history_size: int = 128
+    serve_request_timeout_s: float = 0.0
+    serve_max_restarts: int = 1
 
     out_root: str = DEFAULT_OUT_ROOT
     task: str = "wave_rt_phase1"
@@ -104,6 +108,21 @@ class WaveConfig:
             raise ValueError(
                 f"--stagger-lead must be >= 1 (got {self.stagger_lead})"
             )
+        if self.warmup_frames <= 0 or (
+            self.warmup_frames % self.num_frames_per_block
+        ):
+            raise ValueError(
+                f"warmup_frames must be a positive multiple of "
+                f"{self.num_frames_per_block}"
+            )
+        if self.serve_queue_size <= 0:
+            raise ValueError("serve_queue_size must be positive")
+        if self.serve_history_size <= 0:
+            raise ValueError("serve_history_size must be positive")
+        if self.serve_request_timeout_s < 0:
+            raise ValueError("serve_request_timeout_s must be non-negative")
+        if self.serve_max_restarts < 0:
+            raise ValueError("serve_max_restarts must be non-negative")
 
     @property
     def num_blocks(self) -> int:
@@ -152,6 +171,30 @@ class WaveConfig:
         g.add_argument("--warmup-frames", type=int, default=WaveConfig.warmup_frames,
                        help="serve startup warmup: latent frames for the one-time dummy "
                             "full-window generation (divisible by 3; ~24 reaches steady state)")
+        g.add_argument(
+            "--serve-queue-size",
+            type=int,
+            default=WaveConfig.serve_queue_size,
+            help="maximum admitted requests waiting for the FIFO wavefront",
+        )
+        g.add_argument(
+            "--serve-history-size",
+            type=int,
+            default=WaveConfig.serve_history_size,
+            help="number of terminal request records retained for status lookup",
+        )
+        g.add_argument(
+            "--serve-request-timeout-s",
+            type=float,
+            default=WaveConfig.serve_request_timeout_s,
+            help="poison and restart the worker set after this many seconds; 0 disables",
+        )
+        g.add_argument(
+            "--serve-max-restarts",
+            type=int,
+            default=WaveConfig.serve_max_restarts,
+            help="maximum full distributed worker-set replacements",
+        )
         g.add_argument("--height", type=int, default=WaveConfig.height)
         g.add_argument("--width", type=int, default=WaveConfig.width)
         g.add_argument("--seed", type=int, default=WaveConfig.seed)
@@ -204,6 +247,10 @@ class WaveConfig:
             serve_host=ns.serve_host,
             serve_port=ns.serve_port,
             warmup_frames=ns.warmup_frames,
+            serve_queue_size=ns.serve_queue_size,
+            serve_history_size=ns.serve_history_size,
+            serve_request_timeout_s=ns.serve_request_timeout_s,
+            serve_max_restarts=ns.serve_max_restarts,
             height=ns.height,
             width=ns.width,
             seed=ns.seed,

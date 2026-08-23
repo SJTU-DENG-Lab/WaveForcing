@@ -92,6 +92,44 @@ outputs/preview/corgi/metrics.json
 `--num-frames 399` to match the long-video benchmark protocol below; this
 produces 1596 output frames (approximately 100 seconds at 16 FPS).
 
+### Resident serving
+
+WaveRT can keep every DiT replica, KV transport channel, and VAE stage resident
+across requests. Install the small HTTP extra and add `--serve` to the command
+above:
+
+```bash
+uv sync --extra serve
+
+python -m wave_rt \
+  ... \
+  --serve \
+  --serve-host 0.0.0.0 \
+  --serve-port 8890 \
+  --serve-queue-size 16
+```
+
+A blocking request returns the completed video and E2E metrics:
+
+```bash
+curl -X POST http://127.0.0.1:8890/generate \
+  -H 'content-type: application/json' \
+  -d '{
+    "request_id": "corgi-001",
+    "prompt": "A corgi running through shallow ocean water, cinematic",
+    "seed": 7,
+    "num_frames": 24
+  }'
+```
+
+Set `"wait": false` to receive an immediate request handle, then poll
+`GET /requests/corgi-001`. `GET /status` reports warmup, queue, active request,
+and worker-restart state. Concurrent clients are admitted through a bounded
+queue and executed FIFO: the current WaveRT data plane uses one collective
+sequence across all ranks, so requests do not interleave on the GPUs. Serving
+resolution is fixed at launch because VAE partitions and communication buffers
+are profiled for that shape.
+
 ## Current results
 
 The following numbers are measured on **8× NVIDIA H200 GPUs** with 399 latent
@@ -134,6 +172,7 @@ wave_rt/
 ├── runtime/               # SGLang integration, attention backends, FP8
 ├── distributed/           # process-group compatibility and CUDA IPC
 ├── pipelines/             # streaming VAE pipeline
+├── serving/               # typed sessions, admission, supervision, HTTP
 ├── config.py              # public configuration and CLI arguments
 └── launcher.py            # one-shot and resident serving launchers
 ```

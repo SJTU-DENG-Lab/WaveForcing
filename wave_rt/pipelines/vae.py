@@ -93,7 +93,7 @@ def vae_stage(
     is_first = grp_rank == 0
     is_last = grp_rank == n - 1
 
-    def process_one_request(req_out_dir):
+    def process_one_request(req_out_dir, request_id: str):
         """Decode one request with an isolated feature cache."""
         cache = [None] * 256
 
@@ -174,7 +174,18 @@ def vae_stage(
                     flush=True,
                 )
             if meta_q is not None:
-                meta_q.put(("vae", wall, t_end))
+                from wave_rt.serving.protocol import EventKind, WorkerEvent
+
+                meta_q.put(WorkerEvent(
+                    request_id=request_id,
+                    source="vae",
+                    kind=EventKind.PASSED,
+                    payload={
+                        "vae_ms": wall,
+                        "completed_monotonic_s": t_end,
+                        "num_decoded_frames": nfr,
+                    },
+                ))
 
         if _TIMELINE and tl:
             os.makedirs(_TL_DIR, exist_ok=True)
@@ -191,13 +202,21 @@ def vae_stage(
                 )
 
     if req_q is None:
-        process_one_request(out_dir)
+        process_one_request(out_dir, "oneshot")
     else:
+        from wave_rt.serving.protocol import CommandKind, WorkerCommand
+
         while True:
-            req = req_q.get()
-            if req is None:
+            command = req_q.get()
+            if not isinstance(command, WorkerCommand):
+                raise TypeError(
+                    f"expected WorkerCommand, got {type(command).__name__}"
+                )
+            if command.kind is CommandKind.SHUTDOWN:
                 break
-            process_one_request(req.get("out") or out_dir)
+            req = command.request
+            assert req is not None
+            process_one_request(req.out_dir or out_dir, req.request_id)
 
     dist.barrier()
     dist.destroy_process_group()
