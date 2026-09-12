@@ -1,0 +1,9 @@
+# Reference RF/SF-half DMD from ODE initialization, not an assertion of
+# bitwise reproduction of the official RollingForcing training run.
+seed: 763935
+max_steps: 3000
+distribution_loss: dmd
+dfake_gen_update_ratio: 5
+mix_final_probs: [0.5, 0.0, 0.5]
+log_iters: 100
+resume_save_iters: 500

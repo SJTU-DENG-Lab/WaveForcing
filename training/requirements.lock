@@ -1,0 +1,10 @@
+# Additive packages on top of the WaveRT environment
+# (Python 3.12, PyTorch 2.11.0+cu128, numpy 2, diffusers >=0.37, transformers >=4.49).
+# Install into the repository `.venv`; do not create a second Python/torch stack.
+# GPU hosts are offline: stage these wheels on a connected machine first.
+#
+# flash-attn is not pinned here. It must be a build for this torch/CUDA, not the
+# old 2.8.3.post1+cu124 wheel used with the retired 3.10 training environment.
+lpips==0.1.4
+tensorboard==2.21.0
+wandb==0.28.1

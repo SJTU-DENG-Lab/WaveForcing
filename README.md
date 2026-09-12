@@ -27,7 +27,7 @@ The inference/runtime code in this repository is now open source.
 | Interactive project page and full configuration matrix | ✅ [Available here](https://sjtu-deng-lab.github.io/WaveForcing/) |
 | WaveForcing-T2V-1.3B-5step | ✅ [Preview checkpoint on Hugging Face](https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview) |
 | Additional checkpoints | ⏳ More checkpoints coming soon |
-| Training code | ⏳ Coming soon |
+| Reference training code | [S1/S2/S3 source and recipes](training/README.md) |
 | Paper / arXiv | ⏳ Coming soon |
 
 > [!NOTE]
@@ -92,6 +92,13 @@ outputs/preview/corgi/metrics.json
 `--num-frames 399` to match the long-video benchmark protocol below; this
 produces 1596 output frames (approximately 100 seconds at 16 FPS).
 
+## Reference training
+
+The [training guide](training/README.md) documents the S1/S2/S3 recipe, asset
+preparation, launch, and resume commands. Training uses the same Python 3.12 /
+PyTorch 2.11.0+cu128 environment as WaveRT, under a separate
+[academic-use license](training/LICENSE).
+
 ## Current results
 
 The following numbers are measured on **8× NVIDIA H200 GPUs** with 399 latent
@@ -155,4 +162,6 @@ The arXiv entry is not public yet. For now, please cite the project page:
 
 ## License
 
-Released under the [Apache License 2.0](LICENSE).
+The WaveRT code is released under the [Apache License 2.0](LICENSE).
+The RollingForcing-derived reference trainer retains its separate
+[academic-use license](training/LICENSE).

@@ -1,0 +1,7 @@
+seed: 1504386
+max_steps: 1000
+distribution_loss: paired_coupled_dmd
+paired_only: true
+dfake_gen_update_ratio: 1
+lpips_weight: 0.25
+num_training_frames: 21

@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools==69.5.1", "wheel==0.47.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "waveforcing-training"
+version = "0.1.0"
+description = "WaveForcing S1/S2/S3 reference training"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = {file = "LICENSE"}
+dependencies = [
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "diffusers>=0.37.0",
+    "transformers>=4.49.0",
+    "sentencepiece>=0.2.1",
+    "accelerate>=1.1.1",
+    "numpy>=2.0",
+    "omegaconf>=2.3.1",
+    "einops>=0.8",
+    "ftfy",
+    "regex",
+    "safetensors>=0.4",
+    "huggingface-hub",
+    "lpips==0.1.4",
+    "tensorboard==2.21.0",
+    "wandb==0.28.1",
+    "imageio>=2.31",
+    "imageio-ffmpeg",
+    "pillow",
+    "scipy",
+    "tqdm",
+    "packaging",
+]
+
+[project.optional-dependencies]
+compile = ["ziglang==0.16.0"]
+attn = ["flash-attn"]
+
+[project.scripts]
+wf-train = "wf_training.cli:main"
+wf-prepare-pairs = "wf_training.prepare_pairs:main"
+wf-export = "wf_training.export:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wf_training*"]
+
+[tool.setuptools.package-data]
+wf_training = ["configs/*.yaml"]
+
+[tool.uv.sources]
+torch = {index = "pytorch-cu128"}
+torchvision = {index = "pytorch-cu128"}
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

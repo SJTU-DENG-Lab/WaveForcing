@@ -1,0 +1,4 @@
+seed: 1504386
+max_steps: 2000
+distribution_loss: dmd
+dfake_gen_update_ratio: 5

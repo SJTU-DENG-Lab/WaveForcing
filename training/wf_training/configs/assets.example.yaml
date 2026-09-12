@@ -1,0 +1,11 @@
+# Relative paths resolve from this YAML's directory, never the launch cwd.
+model_root: /path/to/models
+# model_root contains Wan2.1-T2V-1.3B/ and Wan2.1-T2V-14B/.
+prompts: /path/to/vidprom_filtered_extended.txt
+ode_init: /path/to/ode_init.pt
+rf_init: /path/to/rolling_forcing_dmd.pt
+paired_train: /path/to/pairs/manifest_train.jsonl
+paired_val: /path/to/pairs/manifest_val.jsonl
+# For a standalone S3, supply a raw-generator S2 model checkpoint.
+s3_init: /path/to/s2/checkpoint_model_001000/model.pt
+# Optional: use --init-key my_checkpoint to select any additional path key.

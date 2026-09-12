@@ -1,0 +1,6 @@
+outputs/
+__pycache__/
+.venv/
+.pytest_cache/
+*.egg-info/
+wan_models/
