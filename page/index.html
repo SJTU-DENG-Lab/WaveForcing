@@ -732,13 +732,13 @@
             <tbody>
               <tr>
                 <td><b class="quality-metric">Rolling Forcing<sup>*</sup></b></td>
-                <td><div class="quality-cell best">97.78</div></td>
+                <td><div class="quality-cell">97.78</div></td>
                 <td><div class="quality-cell">97.20</div></td>
                 <td><div class="quality-cell">96.23</div></td>
                 <td><div class="quality-cell best">98.84</div></td>
                 <td><div class="quality-cell">53.62</div></td>
-                <td><div class="quality-cell best">69.62</div></td>
-                <td><div class="quality-cell best">1.111</div></td>
+                <td><div class="quality-cell">69.62</div></td>
+                <td><div class="quality-cell">1.111</div></td>
               </tr>
               <tr>
                 <td><b class="quality-metric">Rolling Forcing on WaveRT<sup>*</sup></b></td>
@@ -746,15 +746,15 @@
                 <td><div class="quality-cell">96.69</div></td>
                 <td><div class="quality-cell">96.11</div></td>
                 <td><div class="quality-cell">98.50</div></td>
-                <td><div class="quality-cell best">54.52</div></td>
+                <td><div class="quality-cell">54.52</div></td>
                 <td><div class="quality-cell">66.32</div></td>
                 <td><div class="quality-cell">2.680</div></td>
               </tr>
               <tr>
                 <td class="wave-col"><b class="quality-metric">Wave Forcing<sup>*</sup></b></td>
                 <td class="wave-col"><div class="quality-cell">97.55</div></td>
-                <td class="wave-col"><div class="quality-cell best">97.66</div></td>
-                <td class="wave-col"><div class="quality-cell best">96.69</div></td>
+                <td class="wave-col"><div class="quality-cell">97.66</div></td>
+                <td class="wave-col"><div class="quality-cell">96.69</div></td>
                 <td class="wave-col"><div class="quality-cell">98.28</div></td>
                 <td class="wave-col"><div class="quality-cell">54.31</div></td>
                 <td class="wave-col"><div class="quality-cell">68.89</div></td>
@@ -772,7 +772,13 @@
               </tr>
               <tr>
                 <td class="wave-col"><b class="quality-metric">Wave Forcing 4-step</b></td>
-                <td class="pending-col" colspan="7"><div class="quality-pending"><b>Stay tuned</b><small>Wave Forcing 4-step · results will be posted here</small></div></td>
+                <td><div class="quality-cell best">98.08</div></td>
+                <td><div class="quality-cell best">97.99</div></td>
+                <td><div class="quality-cell best">96.70</div></td>
+                <td><div class="quality-cell">98.76</div></td>
+                <td><div class="quality-cell best">58.69</div></td>
+                <td><div class="quality-cell best">73.27</div></td>
+                <td><div class="quality-cell best">0.319</div></td>
               </tr>
             </tbody>
           </table>
@@ -796,7 +802,7 @@
         </div>
       </div>
 
-      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the same 50 MovieGen prompts, one 1593-frame video per prompt at 16 FPS / 99.56 s. Rolling Forcing on WaveRT is the same Rolling Forcing checkpoint decoded with Wave Forcing's block-causal inference. The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long), which runs its native 4-step long-video inference; Wave Forcing 4-step results are pending and will be posted as the sweep completes. The algorithm × runtime table uses 10 aligned prompts for VBench-Long quality; FPS is DiT-only throughput from a one-shot 399-latent-frame run. Quality Drift is computed following the Rolling Forcing paper, lower-is-better; every other quality metric is higher-is-better.</p></div>
+      <div class="caveat reveal"><span>Protocol</span><p>The 5-step table runs all three arms on the same 50 MovieGen prompts, one 1593-frame video per prompt at 16 FPS / 99.56 s. Rolling Forcing on WaveRT is the same Rolling Forcing checkpoint decoded with Wave Forcing's block-causal inference. The 4-step table forces the same three 5-step checkpoints to a 4-step schedule and adds Causal Forcing (Long), which runs its native 4-step long-video inference; Wave Forcing 4-step results are included. The algorithm × runtime table uses 10 aligned prompts for VBench-Long quality; FPS is DiT-only throughput from a one-shot 399-latent-frame run. Quality Drift is computed following the Rolling Forcing paper, lower-is-better; every other quality metric is higher-is-better.</p></div>
     </section>
 
     <section class="closing">
