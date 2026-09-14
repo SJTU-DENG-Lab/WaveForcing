@@ -6,3 +6,4 @@ __pycache__/
 wan_models/
 /core
 /core.[0-9]*
+prompts/vidprom_filtered_extended.txt

@@ -1,7 +1,9 @@
 # Relative paths resolve from this YAML's directory, never the launch cwd.
+# After copying this file to training/assets.yaml, the prompt path below
+# points at the repository prompts/ directory.
 model_root: /path/to/models
 # model_root contains Wan2.1-T2V-1.3B/ and Wan2.1-T2V-14B/.
-prompts: /path/to/vidprom_filtered_extended.txt
+prompts: ../prompts/vidprom_filtered_extended.txt
 ode_init: /path/to/ode_init.pt
 rf_init: /path/to/rolling_forcing_dmd.pt
 paired_train: /path/to/pairs/manifest_train.jsonl

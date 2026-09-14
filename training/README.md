@@ -5,8 +5,10 @@ The recipe has three stages (S1 / S2 / S3). Training uses the same Python 3.12
 and PyTorch 2.11.0+cu128 environment as
 [WaveRT](../README.md#quick-start-13b-5-step-preview).
 
-Weights, prompts, and teacher pairs are external assets. None are bundled
-with this package.
+Weights and teacher pairs are external assets. Prompt lists live in
+[prompts/](../prompts/). The training list
+`vidprom_filtered_extended.txt` is downloaded separately and is not stored
+in git.
 
 This directory is released under a separate [academic-use license](LICENSE).
 The repository root Apache-2.0 license does not apply here.
@@ -113,7 +115,7 @@ directory.
 | Key                          | Contents                                                                                                                                      |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `model_root`                 | Native Wan directories named `Wan2.1-T2V-1.3B` and `Wan2.1-T2V-14B`, including model configuration and all DiT shards.                        |
-| `prompts`                    | Prompt text, one nonempty line per prompt. Comparisons that reuse a published split should keep the original file bytes and order.            |
+| `prompts`                    | `../prompts/vidprom_filtered_extended.txt`. Download it with the command in [prompts/README.md](../prompts/README.md). Keep the original file bytes and order. |
 | `rf_init`                    | Official RollingForcing `rolling_forcing_dmd.pt`, used by the default five-step S2 start.                                                     |
 | `ode_init`                   | ODE initialization for S1. Self-Forcing `ode_init.pt` and Causal-Forcing `causal_ode.pt` are different checkpoints; record which one you use. |
 | `paired_train`, `paired_val` | Verified JSONL manifests for 2048 training pairs and 128 held-out pairs, plus every referenced tensor file.                                   |
@@ -145,7 +147,7 @@ and `--stride`. Verify only after every shard is finished.
 ```bash
 python -m wf_training.prepare_pairs \
   --model-root /path/to/models \
-  --prompt-path /path/to/vidprom_filtered_extended.txt \
+  --prompt-path ../prompts/vidprom_filtered_extended.txt \
   --output-dir /path/to/pairs \
   --count 2176 --train-count 2048 \
   --base-seed 1504386 --prompt-seed 1504386 \
@@ -153,7 +155,7 @@ python -m wf_training.prepare_pairs \
   --sampling-steps 50 --guidance-scale 3 --shift 5
 
 python -m wf_training.prepare_pairs \
-  --prompt-path /path/to/vidprom_filtered_extended.txt \
+  --prompt-path ../prompts/vidprom_filtered_extended.txt \
   --output-dir /path/to/pairs \
   --count 2176 --train-count 2048 --verify-only
 ```
