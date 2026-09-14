@@ -13,7 +13,7 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf
 
 STAGES = ("s1", "s2", "s3")
-RECIPES = ("reference", "14b-fsdp8", "14b-fsdp8-smoke")
+RECIPES = ("reference", "14b-fsdp8", "14b-fsdp8-smoke", "14b-hsdp", "14b-hsdp-smoke")
 _PATH_FIELDS = {
     "model_root", "data_path", "generator_ckpt", "paired_manifest",
     "paired_validation_manifest", "logdir", "wandb_save_dir", "resume_from",
@@ -84,11 +84,11 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
                    init_key: str | None = None, init_checkpoint: str | None = None,
                    overrides: list[str] | None = None,
                    recipe: str = "reference",
-                   sequence_parallel_size: int | None = None) -> DictConfig:
+                   sequence_parallel_size: int | None = None,
+                   gpus_per_node: int | None = None) -> DictConfig:
     if stage not in STAGES:
         raise ConfigError(f"unsupported stage: {stage}")
-    if world_size < 1:
-        raise ConfigError("world_size must be positive")
+    world_size = _positive_integer(world_size, "world_size")
     defaults = recipe_defaults(recipe)
     if recipe == "reference":
         config = OmegaConf.merge(_resource("base"), _resource(stage))
@@ -130,14 +130,26 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
     config.denoising_step_list = parse_denoising_step_list(config.denoising_step_list)
     config.recipe = recipe
     config.world_size = world_size
+    if gpus_per_node is not None:
+        if (any(item.partition("=")[0] == "gpus_per_node" for item in selected_overrides)
+                and config.gpus_per_node != gpus_per_node):
+            raise ConfigError("--gpus-per-node conflicts with --set gpus_per_node")
+        config.gpus_per_node = gpus_per_node
+    config.gpus_per_node = _positive_integer(
+        getattr(config, "gpus_per_node", world_size), "gpus_per_node")
+    topology = fsdp_topology_metadata(config)
+    for key, value in topology.items():
+        config[key] = value
     sp_size, accumulation = _parallel_sizes(config)
     config.sequence_parallel_size = sp_size
     config.gradient_accumulation_steps = accumulation
     config.data_parallel_size = world_size // sp_size
     config.effective_batch_size = config.data_parallel_size * config.batch_size * accumulation
     sp_suffix = f"_sp{sp_size}" if sp_size > 1 else ""
+    parallel_id = (f"hsdp{config.fsdp_shard_size}x{config.fsdp_replica_size}"
+                   if recipe.startswith("14b-hsdp") else "fsdp8")
     config.recipe_id = (f"wf{sp_suffix}_{stage}" if recipe == "reference" else
-                        f"wf_14b_fsdp8{sp_suffix}_experimental_"
+                        f"wf_14b_{parallel_id}{sp_suffix}_experimental_"
                         + ("smoke_" if recipe.endswith("-smoke") else "") + stage)
     config.model_root = assets["model_root"]
     config.data_path = assets["prompts"]
@@ -152,6 +164,54 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
         config.paired_validation_manifest = assets["paired_val"]
     validate_config(config)
     return config
+
+
+def _positive_integer(value, name):
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value < 1 or int(value) != value):
+        raise ConfigError(f"{name} must be a positive integer")
+    return int(value)
+
+
+def fsdp_topology_metadata(config, rank=None, *, world_size=None):
+    """Describe fixed contiguous node/shard placement without importing torch."""
+    world = _positive_integer(
+        getattr(config, "world_size", 1) if world_size is None else world_size, "world_size")
+    local = _positive_integer(getattr(config, "gpus_per_node", world), "gpus_per_node")
+    if world % local:
+        raise ConfigError("world_size must be divisible by gpus_per_node")
+    strategy = getattr(config, "sharding_strategy", "full")
+    if strategy not in ("full", "hybrid_full", "hybrid_zero2", "no_shard"):
+        raise ConfigError("invalid sharding_strategy")
+    hybrid = strategy in ("hybrid_full", "hybrid_zero2")
+    shard = local if hybrid else (1 if strategy == "no_shard" else world)
+    replicas = world // shard
+    metadata = {
+        "sharding_strategy": strategy, "gpus_per_node": local,
+        "num_nodes": world // local, "fsdp_shard_size": shard,
+        "fsdp_replica_size": replicas, "fsdp_group_layout": "contiguous_nodes_v1",
+    }
+    if rank is not None:
+        if isinstance(rank, bool) or not isinstance(rank, int) or not 0 <= rank < world:
+            raise ConfigError("rank must be an integer in [0, world_size)")
+        metadata.update(fsdp_shard_rank=rank % shard, fsdp_replica_rank=rank // shard)
+    return metadata
+
+
+def validate_checkpoint_fsdp_topology(saved, config, *, rank=None, world_size=None,
+                                      error_type=ConfigError):
+    expected = fsdp_topology_metadata(config, rank, world_size=world_size)
+    present = any(key in saved for key in expected)
+    if not present:
+        # Earlier single-node snapshots predate explicit FSDP topology records.
+        # New HSDP recipes and multi-node runs require explicit placement.
+        # Historical reference uses hybrid_full with only one node/replica.
+        if expected["num_nodes"] != 1 or getattr(config, "recipe", "").startswith("14b-hsdp"):
+            raise error_type("resume checkpoint is missing FSDP topology metadata")
+        return
+    for key, value in expected.items():
+        if saved.get(key) != value:
+            raise error_type(f"resume {key} mismatch: checkpoint={saved.get(key)!r} current={value!r}")
 
 
 def _parallel_sizes(config: DictConfig) -> tuple[int, int]:
@@ -173,8 +233,11 @@ def validate_config(config: DictConfig) -> None:
     steps = parse_denoising_step_list(config.denoising_step_list)
     recipe = getattr(config, "recipe", "reference")
     recipe_defaults(recipe)
-    if int(config.world_size) != config.world_size or config.world_size < 1:
-        raise ConfigError("world_size must be a positive integer")
+    _positive_integer(config.world_size, "world_size")
+    topology = fsdp_topology_metadata(config)
+    for key, value in topology.items():
+        if getattr(config, key, value) != value:
+            raise ConfigError(f"{key} differs from the resolved FSDP topology")
     sp_size, accumulation = _parallel_sizes(config)
     dp_size = config.world_size // sp_size
     if getattr(config, "data_parallel_size", dp_size) != dp_size:
@@ -196,8 +259,13 @@ def validate_config(config: DictConfig) -> None:
     ):
         raise ConfigError("ema_weight must be null or a finite number in [0, 1); 0 disables EMA")
     if recipe != "reference":
-        if config.world_size != 8:
+        hsdp = recipe.startswith("14b-hsdp")
+        if not hsdp and (config.world_size != 8 or topology["num_nodes"] != 1):
             raise ConfigError("14b-fsdp8 recipes require one node with exactly 8 ranks")
+        if hsdp and (topology["gpus_per_node"] != 8 or config.world_size % 8):
+            raise ConfigError("14b-hsdp recipes require exactly 8 GPUs per node")
+        if hsdp and topology["gpus_per_node"] % sp_size:
+            raise ConfigError("sequence_parallel_size must divide gpus_per_node; SP cannot cross nodes")
         if any(config[name] != "Wan2.1-T2V-14B"
                for name in ("generator_name", "real_name", "fake_name")):
             raise ConfigError("14b-fsdp8 generator, real score, and fake score must all be 14B")
@@ -206,9 +274,10 @@ def validate_config(config: DictConfig) -> None:
         if (config.timestep_shift != 5.0 or config.model_kwargs.timestep_shift != 5.0
                 or config.num_train_timestep != 1000 or config.ts_schedule):
             raise ConfigError("14b-fsdp8 requires shift 5, 1000 timesteps, and ts_schedule=false")
-        if (config.sharding_strategy != "full" or config.fsdp_init_mode != "rank0"
+        required_strategy = "hybrid_full" if hsdp else "full"
+        if (config.sharding_strategy != required_strategy or config.fsdp_init_mode != "rank0"
                 or config.ema_mode != "sharded"):
-            raise ConfigError("14b-fsdp8 requires full FSDP, rank0 initialization, and sharded EMA")
+            raise ConfigError(f"{recipe} requires {required_strategy} FSDP, rank0 initialization, and sharded EMA")
         if config.mixed_precision is not True or config.gradient_checkpointing is not True:
             raise ConfigError("14b-fsdp8 requires mixed precision and gradient checkpointing")
     if config.seed <= 0 or int(config.seed) != config.seed:
@@ -404,6 +473,13 @@ def checkpoint_complete(path: str | Path, config: DictConfig,
     marker = json.loads(marker_path.read_text())
     if marker.get("world_size") != config.world_size:
         raise ConfigError("resume checkpoint world_size differs from the saved configuration")
+    validate_checkpoint_fsdp_topology(marker, config)
+    topology = fsdp_topology_metadata(config)
+    if (topology["sharding_strategy"] in ("hybrid_full", "hybrid_zero2")
+            and topology["fsdp_replica_size"] > 1):
+        if (marker.get("version") != 2 or marker.get("optimizer_state_ranks")
+                != list(range(topology["fsdp_shard_size"]))):
+            raise ConfigError("HSDP checkpoint does not declare the first replica's optimizer shards")
     for name in ("sequence_parallel_size", "gradient_accumulation_steps"):
         if marker.get(name, 1) != getattr(config, name, 1):
             raise ConfigError(f"resume checkpoint {name} differs from the saved configuration")

@@ -59,6 +59,19 @@ def initialize_sequence_parallel(size):
     _SP_WORLD_GROUP = dist.group.WORLD
 
 
+def reset_sequence_parallel():
+    """Release the SP subgroup after all work for a stage has completed.
+
+    Every WORLD rank must call this between stages, after freeing model graphs.
+    WORLD and the independent FSDP groups remain alive for the next stage.
+    """
+    global _SP_GROUP, _SP_SIZE, _SP_RANK, _SP_SRC_RANK, _SP_WORLD_GROUP
+    if dist.is_initialized() and _SP_WORLD_GROUP is dist.group.WORLD and _SP_GROUP is not None:
+        dist.destroy_process_group(_SP_GROUP)
+    _SP_GROUP, _SP_SIZE, _SP_RANK, _SP_SRC_RANK = None, 1, 0, 0
+    _SP_WORLD_GROUP = None
+
+
 def get_sp_world_size():
     return _SP_SIZE
 

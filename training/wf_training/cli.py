@@ -22,17 +22,23 @@ _ENV_WHITELIST = (
     "RF_BLOCK_CAUSAL", "RF_FLEX_ATTN", "RF_FLEX_COMPILE", "TORCH_HOME",
     "HF_HOME", "HF_HUB_CACHE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE",
     "TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR", "PYTORCH_CUDA_ALLOC_CONF", "CC", "CXX",
+    "RANK", "WORLD_SIZE", "LOCAL_RANK", "LOCAL_WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT",
+    "NCCL_SOCKET_IFNAME", "NCCL_IB_HCA", "NCCL_CROSS_NIC", "NCCL_IB_DISABLE",
+    "NCCL_DEBUG", "NCCL_DEBUG_SUBSYS", "TORCH_DISTRIBUTED_DEBUG",
 )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="WaveForcing S1/S2/S3 training")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("show-config", "preflight", "run"):
+    for name in ("show-config", "preflight", "run", "distributed-run"):
         sub = commands.add_parser(name)
         sub.add_argument("--assets", required=True, help="YAML of explicit local asset paths")
         sub.add_argument("--output", required=True, help="run root; each stage gets its own subdirectory")
-        sub.add_argument("--world-size", type=int, default=8, help="local torchrun GPU count")
+        sub.add_argument("--world-size", type=int, default=None,
+                         help="total GPU count; default: 8, or WORLD_SIZE under external torchrun")
+        sub.add_argument("--gpus-per-node", type=int,
+                         help="GPUs per node; external torchrun uses LOCAL_WORLD_SIZE")
         sub.add_argument("--recipe", choices=RECIPES, default="reference",
                          help="training recipe; select parallelism with --sp")
         sub.add_argument("--sp", "-sp", type=int, dest="sequence_parallel_size",
@@ -46,10 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="key=value or stage.key=value override; e.g. "
                               "gradient_accumulation_steps=2 (default auto follows SP)")
         sub.add_argument("--dry-run", action="store_true", help="print the plan without writes or GPU imports")
-    resume = commands.add_parser("resume", help="restore a stage's complete model/optimizer/RNG state")
-    resume.add_argument("--run", required=True, help="stage directory containing resolved_config.yaml")
-    resume.add_argument("--checkpoint", required=True, help="complete checkpoint directory for this stage")
-    resume.add_argument("--dry-run", action="store_true")
+    for name in ("resume", "distributed-resume"):
+        resume = commands.add_parser(name, help="restore a stage's complete model/optimizer/RNG state")
+        resume.add_argument("--run", required=True, help="stage directory containing resolved_config.yaml")
+        resume.add_argument("--checkpoint", required=True, help="complete checkpoint directory for this stage")
+        resume.add_argument("--dry-run", action="store_true")
     worker = commands.add_parser("_worker", help=argparse.SUPPRESS)
     worker.add_argument("--config", required=True)
     worker.add_argument("--resume-from", default="")
@@ -73,17 +80,23 @@ def build_plan(args) -> list:
     configs = []
     previous = None
     for stage in selected_stages(args):
-        config = resolve_config(stage, assets, args.output, args.world_size,
+        config = resolve_config(stage, assets, args.output,
+                                8 if args.world_size is None else args.world_size,
                                 init_key=args.init_key if previous is None else None,
                                 init_checkpoint=previous, overrides=args.overrides,
                                 recipe=getattr(args, "recipe", "reference"),
-                                sequence_parallel_size=getattr(args, "sequence_parallel_size", None))
+                                sequence_parallel_size=getattr(args, "sequence_parallel_size", None),
+                                gpus_per_node=getattr(args, "gpus_per_node", None))
         configs.append(config)
         previous = str(Path(config.logdir) / f"checkpoint_model_{config.max_steps:06d}" / "model.pt")
     return configs
 
 
 def worker_command(config, config_path: Path, resume_from: str = "") -> list[str]:
+    if (getattr(config, "num_nodes", 1) != 1
+            or getattr(config, "gpus_per_node", config.world_size) != config.world_size):
+        raise ConfigError("multi-node training requires external torchrun with distributed-run "
+                          "or distributed-resume; run/resume only launch one node")
     command = [sys.executable, "-m", "torch.distributed.run", "--standalone",
                f"--nproc_per_node={config.world_size}",
                "--log-dir", str(Path(config.logdir) / "torchrun_logs"), "--tee", "3",
@@ -104,9 +117,15 @@ def _write_json(path: Path, data: dict) -> None:
     os.replace(temporary, path)
 
 
-def _display_plan(configs: list) -> None:
+def _display_plan(configs: list, *, external: bool = False) -> None:
+    def command(config):
+        if external or getattr(config, "num_nodes", 1) > 1:
+            return {"launcher": "external torchrun", "nnodes": config.num_nodes,
+                    "nproc_per_node": config.gpus_per_node,
+                    "entrypoint": "-m wf_training distributed-run"}
+        return worker_command(config, Path(config.logdir) / "resolved_config.yaml")
     print(json.dumps({"mode": "plan_only", "stages": [
-        {"config": plain(config), "command": worker_command(config, Path(config.logdir) / "resolved_config.yaml")}
+        {"config": plain(config), "command": command(config)}
         for config in configs]}, indent=2, ensure_ascii=False))
 
 
@@ -134,6 +153,8 @@ def _execute(config, config_path: Path, *, resume_from: str = "") -> None:
 
 
 def _run(configs: list) -> None:
+    for config in configs:
+        worker_command(config, Path(config.logdir) / "resolved_config.yaml")
     # Check the entire plan before starting stage one. Later init files are
     # expected outputs; all other model/data assets must already be available.
     for index, config in enumerate(configs):
@@ -181,7 +202,7 @@ def load_resume(run: str, checkpoint: str):
     return config, config_path, str(path)
 
 
-def _worker(args) -> None:
+def _worker(args, *, keep_process_group: bool = False) -> None:
     config = OmegaConf.load(Path(args.config).resolve())
     validate_config(config)
     if args.resume_from:
@@ -193,9 +214,12 @@ def _worker(args) -> None:
     import torch
     from wf_training.trainer import distillation
     trainer = None
+    completed = False
     try:
         trainer = distillation.Trainer(config)
         rank = torch.distributed.get_rank()
+        from wf_training.utils.parallel_topology import get_fsdp_topology
+        topology = get_fsdp_topology()
         properties = torch.cuda.get_device_properties(trainer.device)
         _write_json(Path(config.logdir) / f"worker_rank{rank:02d}.json", {
             "created_at": _now(), "rank": rank, "world_size": trainer.world_size,
@@ -203,6 +227,9 @@ def _worker(args) -> None:
             "data_parallel_size": getattr(config, "data_parallel_size", trainer.world_size),
             "gradient_accumulation_steps": getattr(config, "gradient_accumulation_steps", 1),
             "effective_batch_size": config.effective_batch_size,
+            "fsdp_topology": topology.metadata(rank_specific=True) if topology else None,
+            "fsdp_shard_ranks": list(topology.shard_ranks) if topology else None,
+            "fsdp_replica_ranks": list(topology.replica_ranks) if topology else None,
             "python": sys.executable, "trainer_source": str(Path(distillation.__file__).resolve()),
             "torch": torch.__version__, "cuda_build": torch.version.cuda,
             "gpu": properties.name, "gpu_memory_bytes": properties.total_memory,
@@ -211,11 +238,36 @@ def _worker(args) -> None:
             "environment": {key: os.environ[key] for key in _ENV_WHITELIST if key in os.environ},
         })
         trainer.train()
+        completed = True
     finally:
-        if trainer is not None and hasattr(trainer, "writer"):
-            trainer.writer.close()
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
+        try:
+            if trainer is not None and hasattr(trainer, "writer"):
+                trainer.writer.close()
+        except (Exception, KeyboardInterrupt):
+            completed = False
+            raise
+        finally:
+            cleanup = None
+            if keep_process_group and completed and trainer is not None:
+                from wf_training.utils.distributed import clear_completed_fsdp_saved_views
+                torch.cuda.synchronize()
+                cleanup = {"before_bytes": torch.cuda.memory_allocated()}
+                cleanup.update(clear_completed_fsdp_saved_views(trainer.model))
+                cleanup["after_saved_views_bytes"] = torch.cuda.memory_allocated()
+            trainer = None
+            if keep_process_group:
+                import gc
+                from wf_training.utils.sequence_parallel import reset_sequence_parallel
+                gc.collect()
+                torch.cuda.empty_cache()
+                if completed:
+                    reset_sequence_parallel()
+                if cleanup is not None:
+                    cleanup.update(created_at=_now(), rank=rank,
+                                   after_gc_bytes=torch.cuda.memory_allocated())
+                    _write_json(Path(config.logdir) / f"stage_cleanup_rank{rank:02d}.json", cleanup)
+            elif torch.distributed.is_initialized():
+                torch.distributed.destroy_process_group()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -223,6 +275,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "_worker":
             _worker(args)
+        elif args.command in ("distributed-run", "distributed-resume"):
+            if args.dry_run:
+                if args.command == "distributed-run":
+                    from wf_training.utils.multinode import apply_torchrun_topology
+                    apply_torchrun_topology(args)
+                    _display_plan(build_plan(args), external=True)
+                else:
+                    config, path, resume_from = load_resume(args.run, args.checkpoint)
+                    print(json.dumps({"mode": "resume_plan_only", "config": plain(config),
+                                      "config_path": str(path), "resume_from": resume_from,
+                                      "launcher": "external torchrun"}, indent=2))
+            else:
+                from wf_training.utils.multinode import distributed_main
+                distributed_main(args)
         elif args.command == "resume":
             config, path, resume_from = load_resume(args.run, args.checkpoint)
             if args.dry_run:

@@ -1,0 +1,96 @@
+# Multi-node 14B HSDP smoke; validated on 2x8 H200 with HSDP8x2/SP4 on 2026-09-14.
+# Node count comes from torchrun, not this recipe. Full stage budgets are not scaled.
+default_stages: [s1, s2, s3]
+init_keys:
+  s1: distill_init_14b
+  s2: s2_init_14b
+  s3: s3_init_14b
+common:
+  # WORLD is provided by torchrun; each contiguous node shards across 8 GPUs.
+  # Identical local-rank shards are replicated across nodes. SP stays within a node.
+  gpus_per_node: 8
+  generator_name: Wan2.1-T2V-14B
+  fake_name: Wan2.1-T2V-14B
+  real_name: Wan2.1-T2V-14B
+  generator_fsdp_wrap_strategy: size
+  real_score_fsdp_wrap_strategy: size
+  fake_score_fsdp_wrap_strategy: size
+  text_encoder_fsdp_wrap_strategy: size
+  sharding_strategy: hybrid_full
+  fsdp_init_mode: rank0
+  ema_mode: sharded
+  profile_memory: true
+  mixed_precision: true
+  batch_size: 1
+  sequence_parallel_size: 4
+  # Auto follows SP: global effective batch equals WORLD (64 on 8 nodes).
+  # To keep effective batch 8 on 64 GPUs: --sp 8 --set gradient_accumulation_steps=1.
+  gradient_accumulation_steps: auto
+  lr: 1.5e-6
+  lr_critic: 4.0e-7
+  beta1: 0.0
+  beta2: 0.999
+  beta1_critic: 0.0
+  beta2_critic: 0.999
+  weight_decay: 0.01
+  ema_weight: 0.99
+  ema_start_step: 0
+  log_iters: 500
+  resume_save_iters: 500
+  gc_interval: 100
+  num_train_timestep: 1000
+  timestep_shift: 5.0
+  denoising_step_list: [1000, 750, 500, 250]
+  warp_denoising_step: true
+  ts_schedule: false
+  guidance_scale: 3.0
+  denoising_loss_type: flow
+  image_or_video_shape: [1, 21, 16, 60, 104]
+  num_training_frames: 27
+  num_frame_per_block: 3
+  independent_first_frame: false
+  same_step_across_blocks: true
+  last_step_only: false
+  context_noise: 0
+  causal: true
+  i2v: false
+  load_raw_video: false
+  gradient_checkpointing: true
+  model_kwargs:
+    timestep_shift: 5.0
+  trainer: score_distillation
+  attention_mode: full
+  flex_attention: true
+  flex_compile: true
+  mix_schedule: fixed
+  mix_final_probs: [0.3333333333333333, 0.3333333333333333, 0.3333333333333333]
+  lpips_weight: 0.0
+  lpips_subset_ratio: 0.25
+  max_context_blocks: 26
+  paired_num_workers: 2
+  paired_expected_train: 2048
+  paired_expected_val: 128
+  no_save: false
+  no_visualize: true
+  disable_wandb: true
+  negative_prompt: '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走'
+stages:
+  s1:
+    seed: 763935
+    max_steps: 6
+    distribution_loss: dmd
+    dfake_gen_update_ratio: 5
+    mix_final_probs: [0.5, 0.0, 0.5]
+  s2:
+    seed: 1504386
+    max_steps: 2
+    distribution_loss: paired_coupled_dmd
+    paired_only: true
+    dfake_gen_update_ratio: 1
+    lpips_weight: 0.25
+    num_training_frames: 21
+  s3:
+    seed: 1504386
+    max_steps: 6
+    distribution_loss: dmd
+    dfake_gen_update_ratio: 5

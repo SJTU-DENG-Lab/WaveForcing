@@ -408,6 +408,7 @@ class SPTrainerTest(unittest.TestCase):
                         patch.object(trainer_module.dist, "get_rank", return_value=5), \
                         patch.object(trainer_module.dist, "get_world_size", return_value=8), \
                         patch.object(torch.cuda, "current_device", return_value=0), \
+                        patch.object(trainer_module, "initialize_fsdp_topology", side_effect=lambda cfg: events.append("fsdp")), \
                         patch.object(trainer_module, "initialize_sequence_parallel", side_effect=lambda size: events.append(("sp", size))), \
                         patch.object(trainer_module, "get_data_parallel_rank", return_value=1), \
                         patch.object(trainer_module, "get_data_parallel_world_size", return_value=2), \
@@ -419,7 +420,7 @@ class SPTrainerTest(unittest.TestCase):
                         patch.object(torch.utils.data.distributed, "DistributedSampler", wraps=torch.utils.data.distributed.DistributedSampler) as sampler, \
                         patch.object(torch.utils.data, "DataLoader", return_value=loader):
                     Trainer(config)
-                self.assertEqual(events, [("sp", 4), "model"])
+                self.assertEqual(events, ["fsdp", ("sp", 4), "model"])
                 seed.assert_called_once_with(124)
                 self.assertEqual(sampler.call_count, 2 if paired else 1)
                 for call in sampler.call_args_list:

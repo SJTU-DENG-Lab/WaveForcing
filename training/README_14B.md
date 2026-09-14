@@ -1,4 +1,10 @@
-# Experimental 14B training on 8 H200 GPUs
+# Experimental 14B training on H200 GPUs
+
+This guide covers both the single-node FSDP recipes and the multi-node HSDP
+recipes. The 2×8 H200 HSDP8×2/SP4 smoke completed S1/S2/S3 (6/2/6 steps)
+and a native S2 step 1→2 restart on 2026-09-14. The first table below remains
+the historical single-node FSDP8/SP4 result; the multi-node launch, recovery,
+and measurements are documented later in this file.
 
 The `14b-fsdp8` and `14b-fsdp8-smoke` recipes target one node with
 eight H200 GPUs. Select spatial sequence parallelism independently with
@@ -32,10 +38,12 @@ and the earlier SP1 report (`2026-09-14-wf-14b-fsdp8-smoke/REPORT.md` in externa
 for its OOM record.
 
 The default `--recipe reference` retains the existing 1.3B student/critic,
-14B teacher, and S2 → S3 plan. The 14B recipes select S1 → S2 → S3 by default
-and require exactly eight ranks. All use full FSDP, rank-0 initialization,
-sharded EMA, BF16 mixed precision, and gradient checkpointing. Without
-`--sp`, the packaged YAML defaults to `sequence_parallel_size: 1`.
+14B teacher, and S2 → S3 plan. The `14b-fsdp8*` recipes select S1 → S2 → S3
+by default and require exactly eight ranks. They use full FSDP, rank-0
+initialization, sharded EMA, BF16 mixed precision, and gradient checkpointing.
+The `14b-hsdp*` recipes use the same model and stage settings with explicit
+per-node shard and cross-node replica groups. Without `--sp`, each packaged
+YAML supplies its own sequence-parallel default.
 The option takes one degree per launch; it does not launch a sweep.
 
 FSDP spans all eight ranks for every SP degree. Each SP group processes
@@ -110,6 +118,10 @@ initial-asset keys, and overridable parallelism defaults:
 
 - [14b-fsdp8.yaml](wf_training/configs/14b-fsdp8.yaml): full experimental budgets; choose SP with `--sp`.
 - [14b-fsdp8-smoke.yaml](wf_training/configs/14b-fsdp8-smoke.yaml): smoke budgets; choose SP with `--sp`.
+- [14b-hsdp.yaml](wf_training/configs/14b-hsdp.yaml): full multi-node
+  HSDP budgets; node count comes from `torchrun`.
+- [14b-hsdp-smoke.yaml](wf_training/configs/14b-hsdp-smoke.yaml):
+  multi-node smoke budgets; validated on 2×8 H200 with SP4.
 - [assets.14b.example.yaml](wf_training/configs/assets.14b.example.yaml): local asset template.
 
 | Stage | Initialization | Objective | Full iterations | Smoke iterations |
@@ -201,9 +213,9 @@ checks the referenced local files and native model metadata.
 After the assets and execution environment are ready, remove `--dry-run`
 to run the smoke plan. Use a new output root and `--recipe 14b-fsdp8 --sp 4`
 for the full experimental budgets when moving beyond the smoke. Explicit
-`--stage` / `--stages` and stage-scoped `--set` remain available. All 14B
-plans retain the native four-step schedule, eight-rank topology, full
-FSDP, rank-0 initialization, and sharded EMA constraints.
+`--stage` / `--stages` and stage-scoped `--set` remain available. All
+single-node 14B plans retain the native four-step schedule, eight-rank topology,
+full FSDP, rank-0 initialization, and sharded EMA constraints.
 
 Launch the SP4 smoke with the same assets and a separate output directory:
 
@@ -232,9 +244,82 @@ actual peak when changing the training workload. The completed SP4 smoke
 measured rank-0 lifetime peak RSS of approximately 176–177 GiB during
 full exports, with 425.838 GiB written per final checkpoint.
 
+### Multi-node HSDP launch
+
+Each node contributes eight contiguous ranks. HSDP uses `HYBRID_SHARD`:
+parameters are sharded over the eight GPUs within a node, while the same
+local-rank shard is replicated across nodes. SP groups must remain within a
+node. Parameter all-gather, gradient reduce-scatter, and QKV exchange are
+intra-node; the gradient-shard all-reduce crosses nodes. Every rank records
+its actual shard, replica, and SP groups in the run manifest.
+
+Each SP group processes one independent sample:
+
+`effective_batch = WORLD_SIZE / SP × gradient_accumulation_steps`
+
+| Topology | Global microbatch | Accumulation | Effective batch |
+|---|---:|---:|---:|
+| 8 GPUs, SP4 | 2 | 4 (`auto`) | 8 |
+| 16 GPUs, SP4, validated | 4 | 4 (`auto`) | 16 |
+| 64 GPUs, SP4 | 16 | 4 (`auto`) | 64 |
+| 64 GPUs, SP8 | 8 | 1 (explicit) | 8 |
+
+`auto` follows the SP degree; it does not preserve a fixed global batch as
+the node count changes. Use the same source package, Python environment,
+asset paths, and shared output path on every node. GPU workers are offline,
+so prepare dependencies and model assets before launch.
+
+Preview the validated two-node configuration without initializing distributed
+training or creating the output directory:
+
+```bash
+.venv/bin/python -m wf_training show-config \
+  --recipe 14b-hsdp-smoke --world-size 16 --gpus-per-node 8 \
+  --sp 4 --assets /shared/configs/assets.14b.yaml \
+  --output /shared/runs/wf14b-hsdp-smoke-001
+```
+
+Replace `show-config` with `preflight` to check assets and native model
+metadata. Launch this command once on every node, changing only
+`WF_NODE_RANK` in `0..WF_NNODES-1`:
+
+```bash
+export WF_NNODES=2
+export WF_NODE_RANK=0
+export WF_MASTER_ADDR=10.0.0.1
+export WF_MASTER_PORT=29501
+
+.venv/bin/python -m torch.distributed.run \
+  --nnodes="$WF_NNODES" --nproc-per-node=8 \
+  --node-rank="$WF_NODE_RANK" \
+  --master-addr="$WF_MASTER_ADDR" --master-port="$WF_MASTER_PORT" \
+  --max-restarts=0 \
+  -m wf_training distributed-run \
+  --recipe 14b-hsdp-smoke --sp 4 \
+  --assets /shared/configs/assets.14b.yaml \
+  --output /shared/runs/wf14b-hsdp-smoke-001
+```
+
+The launcher reads topology from `WORLD_SIZE` and `LOCAL_WORLD_SIZE`; an
+explicit `--world-size` must agree with `torchrun`. Use `--recipe 14b-hsdp`
+and a new output root for full budgets. NCCL network variables must match the
+cluster topology. The validated two-node run used eth0 TCP Socket; it did not
+validate RDMA throughput.
+
+After each successfully trained and saved stage, the process synchronizes
+CUDA, verifies that all FSDP modules and handles are idle, releases FSDP1
+saved parameter views, then destroys the trainer, runs GC, and clears the
+allocator cache. Failed stages do not take this success-only cleanup path.
+This explicit release is required because frozen/no-grad forward can leave
+live view-reference cycles in `flat_param._tensors`; Python GC and
+`empty_cache()` cannot release live tensor storage by themselves. Before the
+fix, S2 and S3 began with about 16.019 and 31.974 GiB allocated per GPU and S3
+ran out of memory on its sixth generator update. After the fix, both stages
+began at about 66 MiB and the previously failing update completed.
+
 ## Checkpoints and resume acceptance
 
-Both 14B recipes save a complete final checkpoint. They do not bypass saving
+The single-node 14B recipes save a complete final checkpoint. They do not bypass saving
 or disable recovery to make the smoke run fit. Default periodic save
 intervals remain 500 iterations, so each short smoke stage normally saves
 only its final state. Keep `model.pt`, `resume_complete.json`, and all eight
@@ -289,6 +374,29 @@ branch when available, plus SHA-256 hashes for the actual installed
 Without Git, the Git fields are null and file hashes are still recorded.
 Hidden paths and symlinks are excluded; the manifest records skipped file
 symlinks. It does not record a Git diff or inherited private state.
+
+Multi-node HSDP checkpoints use format version 2. Every rank writes
+`trainer_state_rankNN.pt` with its RNG, data cursors, counters, and topology.
+Only ranks 0–7 in the first replica write optimizer and sharded EMA tensor
+payloads; corresponding ranks in later replicas record the owner rank.
+`resume_complete.json` lists all rank files and records world size, GPUs per
+node, SP, accumulation, shard groups, and replica groups. Keep the complete
+checkpoint directory. Native resume requires exactly the saved topology;
+changing world size, SP, accumulation, or the HSDP layout requires starting a
+new run from raw generator weights instead of restoring optimizer/RNG state.
+
+For same-topology HSDP resume, run the same `torchrun` prefix on every node:
+
+```bash
+.venv/bin/python -m torch.distributed.run \
+  --nnodes="$WF_NNODES" --nproc-per-node=8 \
+  --node-rank="$WF_NODE_RANK" \
+  --master-addr="$WF_MASTER_ADDR" --master-port="$WF_MASTER_PORT" \
+  --max-restarts=0 \
+  -m wf_training distributed-resume \
+  --run /shared/runs/wf14b-hsdp-full-001/s2 \
+  --checkpoint /shared/runs/wf14b-hsdp-full-001/s2/checkpoint_model_000500
+```
 
 ## Validation checks
 
@@ -360,5 +468,14 @@ After the CLI and explicit teacher-forcing flag refactors and packed QKV
 exchange, all 104 CPU tests and 12 four-rank GLOO model comparisons passed.
 These include SP2/4/8 exchange ordering, exact reference outputs and gradients,
 unused-gradient semantics, second derivatives, and checkpoint recomputation.
-This later implementation has not repeated the 14B H200 smoke, timing, or
-memory measurements above.
+The later multi-node package passed 138 CPU tests, including a real four-process
+CPU/GLOO nested-FSDP HSDP2×2/SP2 lifecycle regression. Its 2×8 H200 smoke
+passed S1/S2/S3 and native S2 step 1→2 resume. Maximum per-rank allocated
+memory was 122.514/104.736/121.190 GiB for S1/S2/S3 and 104.736 GiB for the
+resume; all 16 ranks ended each stage at 66.000–68.973 MiB. Complete markers,
+rank topology, optimizer/EMA metadata, finite loss/gradient scalars, and zero
+nonfinite/skip signals passed acceptance. The immutable record is
+`Auto-Research/auto_experiments/2026-09-14-wf-14b-hsdp16-sp4-smoke/REPORT.md`
+in external experiment storage. This short smoke does not establish
+convergence, video quality, long-run stability, RDMA performance, or
+cross-rank tensor numerical equivalence.

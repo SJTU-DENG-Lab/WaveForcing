@@ -10,6 +10,8 @@ from wf_training.utils.ema import ShardedEMA
 from wf_training.utils.checkpoint import load_model_checkpoint, generator_state
 from wf_training.utils.memory import memory_scope
 from wf_training.utils.misc import set_seed
+from wf_training.config import fsdp_topology_metadata, validate_checkpoint_fsdp_topology
+from wf_training.utils.parallel_topology import initialize_fsdp_topology
 from wf_training.utils.sequence_parallel import (
     initialize_sequence_parallel,
     get_data_parallel_rank,
@@ -42,6 +44,7 @@ class Trainer:
         self.world_size = dist.get_world_size()
         if self.world_size != config.world_size:
             raise ValueError("torchrun world size differs from the resolved configuration")
+        initialize_fsdp_topology(config)
         self.sequence_parallel_size = int(getattr(config, "sequence_parallel_size", 1))
         self.gradient_accumulation_steps = int(
             getattr(config, "gradient_accumulation_steps", 1))
@@ -343,24 +346,26 @@ class Trainer:
     def _save_resume_state(self, checkpoint_dir):
         """Save a same-world-size, per-rank exact training snapshot."""
         rank = dist.get_rank()
+        owner = self._optimizer_state_owner(rank)
         state = {
-            "version": 1,
+            "version": 2 if owner != rank or self._uses_replicated_shards() else 1,
             "step": self.step,
             "world_size": self.world_size,
             "rank": rank,
             **self._training_topology(rank),
             "data_batches_seen": self.data_batches_seen,
             "paired_batches_seen": self.paired_batches_seen,
-            "generator_optimizer": self.generator_optimizer.state_dict(),
+            "optimizer_state_rank": owner,
+            "generator_optimizer": self.generator_optimizer.state_dict() if owner == rank else None,
             "critic_optimizer": (
                 self.critic_optimizer.state_dict()
-                if self.critic_optimizer is not None else None
+                if self.critic_optimizer is not None and owner == rank else None
             ),
             "nan_skip_count": getattr(self, "nan_skip_count", 0),
             "critic_nan_skip_count": getattr(self, "critic_nan_skip_count", 0),
             "ema_mode": getattr(self.config, "ema_mode", "full"),
             "generator_ema_shard": (self.generator_ema.state_dict()
-                                    if isinstance(self.generator_ema, ShardedEMA) else None),
+                                    if isinstance(self.generator_ema, ShardedEMA) and owner == rank else None),
             "rng": {
                 "python": random.getstate(),
                 "numpy": np.random.get_state(),
@@ -377,7 +382,7 @@ class Trainer:
 
         if self.is_main_process:
             marker = {
-                "version": 1,
+                "version": 2 if self._uses_replicated_shards() else 1,
                 "step": self.step,
                 "world_size": self.world_size,
                 **self._training_topology(),
@@ -386,6 +391,8 @@ class Trainer:
                     f"trainer_state_rank{r:02d}.pt"
                     for r in range(self.world_size)
                 ],
+                "optimizer_state_ranks": sorted({self._optimizer_state_owner(r)
+                                                 for r in range(self.world_size)}),
             }
             marker_path = os.path.join(
                 checkpoint_dir, "resume_complete.json")
@@ -397,6 +404,37 @@ class Trainer:
             print("Resume state saved to", checkpoint_dir)
         dist.barrier()
 
+    def _uses_replicated_shards(self):
+        topology = fsdp_topology_metadata(self.config, world_size=self.world_size)
+        return (topology["sharding_strategy"] in ("hybrid_full", "hybrid_zero2")
+                and topology["fsdp_replica_size"] > 1)
+
+    def _optimizer_state_owner(self, rank):
+        if self._uses_replicated_shards():
+            topology = fsdp_topology_metadata(self.config, world_size=self.world_size)
+            return rank % topology["fsdp_shard_size"]
+        return rank
+
+    def _resume_optimizer_state(self, checkpoint_dir, state, rank):
+        """Read shared optimizer/EMA tensors while keeping this rank's own RNG/cursors."""
+        owner = self._optimizer_state_owner(rank)
+        if state.get("optimizer_state_rank", rank) != owner:
+            raise ValueError("resume optimizer_state_rank does not match the FSDP shard owner")
+        if self._uses_replicated_shards() and state.get("version") != 2:
+            raise ValueError("replicated HSDP optimizer state requires checkpoint version 2")
+        if owner == rank:
+            return state
+        payload = load_model_checkpoint(os.path.join(
+            checkpoint_dir, f"trainer_state_rank{owner:02d}.pt"))
+        if (payload.get("rank") != owner or payload.get("world_size") != self.world_size
+                or payload.get("step") != state["step"] or payload.get("version") != 2
+                or payload.get("optimizer_state_rank") != owner):
+            raise ValueError("resume optimizer shard owner identity/step mismatch")
+        self._validate_resume_topology(payload, rank=owner)
+        if payload.get("ema_mode") != state.get("ema_mode"):
+            raise ValueError("resume optimizer shard owner EMA mode mismatch")
+        return payload
+
     def _training_topology(self, rank=None):
         sp_size = int(getattr(self.config, "sequence_parallel_size", 1))
         topology = {
@@ -404,6 +442,7 @@ class Trainer:
             "gradient_accumulation_steps": int(
                 getattr(self.config, "gradient_accumulation_steps", 1)),
             "data_parallel_world_size": self.world_size // sp_size,
+            **fsdp_topology_metadata(self.config, rank, world_size=self.world_size),
         }
         if rank is not None:
             topology.update(sequence_parallel_rank=rank % sp_size,
@@ -411,6 +450,8 @@ class Trainer:
         return topology
 
     def _validate_resume_topology(self, saved, *, rank=None):
+        validate_checkpoint_fsdp_topology(
+            saved, self.config, rank=rank, world_size=self.world_size, error_type=ValueError)
         # Snapshots written before SP/accumulation describe SP1 and one microbatch.
         legacy = {
             "sequence_parallel_size": 1,
@@ -420,6 +461,8 @@ class Trainer:
             "data_parallel_rank": rank,
         }
         for key, expected in self._training_topology(rank).items():
+            if key not in legacy:
+                continue  # FSDP placement/strategy was checked above, including string fields.
             value = int(saved.get(key, legacy[key]))
             if value != expected:
                 raise ValueError(
@@ -449,10 +492,11 @@ class Trainer:
                 "rank-state world_size mismatch: "
                 f"checkpoint={state['world_size']} current={self.world_size}")
         self._validate_resume_topology(state, rank=rank)
+        tensor_state = self._resume_optimizer_state(checkpoint_dir, state, rank)
 
         self.generator_optimizer.load_state_dict(
-            state["generator_optimizer"])
-        critic_optimizer_state = state.get("critic_optimizer")
+            tensor_state["generator_optimizer"])
+        critic_optimizer_state = tensor_state.get("critic_optimizer")
         if self.critic_optimizer is not None:
             if critic_optimizer_state is None:
                 raise KeyError(f"resume state has no critic optimizer: {rank_path}")
@@ -468,7 +512,7 @@ class Trainer:
         self.critic_nan_skip_count = int(state.get("critic_nan_skip_count", 0))
         if state.get("ema_mode", "full") != getattr(self.config, "ema_mode", "full"):
             raise ValueError("EMA storage mode differs from the saved rank state")
-        self._resume_ema_shard = state.get("generator_ema_shard")
+        self._resume_ema_shard = tensor_state.get("generator_ema_shard")
 
         # The text dataset and DistributedSampler are deterministic and repeat
         # the same order each cycle. Advance to the exact saved cursor before
