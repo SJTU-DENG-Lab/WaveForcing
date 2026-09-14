@@ -1,4 +1,4 @@
-from wf_training.wan.modules.attention import attention, FLEX_ATTENTION_AVAILABLE
+from wf_training.wan.modules.attention import attention, FLEX_ATTENTION_AVAILABLE, _get_flex_attention
 from wf_training.wan.modules.model import (
     WanRMSNorm,
     rope_apply,
@@ -6,7 +6,8 @@ from wf_training.wan.modules.model import (
     WAN_CROSSATTENTION_CLASSES,
     rope_params,
     MLPProj,
-    sinusoidal_embedding_1d
+    sinusoidal_embedding_1d,
+    _spatial_num_frames,
 )
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
@@ -15,6 +16,13 @@ import torch
 import math
 import os
 import torch.distributed as dist
+from wf_training.utils.sequence_parallel import (
+    get_sp_world_size,
+    split_spatial,
+    gather_spatial,
+    sequence_to_head,
+    head_to_sequence,
+)
 
 if FLEX_ATTENTION_AVAILABLE:
     from torch.nn.attention.flex_attention import create_block_mask
@@ -188,10 +196,21 @@ class CausalWanSelfAttention(nn.Module):
             return q, k, v
 
         q, k, v = qkv_fn(x)
+        # Clean/noisy teacher forcing uses two consecutive copies of the frame
+        # grid. Within each frame, exchange spatial tokens for head shards.
+        is_tf = kv_cache is None and s * get_sp_world_size() == seq_lens[0].item() * 2
+        num_frames = int(grid_sizes[0, 0]) * (2 if is_tf else 1)
+        q = sequence_to_head(q, num_frames)
+        k = sequence_to_head(k, num_frames)
+        v = sequence_to_head(v, num_frames)
+        if get_sp_world_size() > 1 and kv_cache is not None:
+            expected_heads = self.num_heads // get_sp_world_size()
+            if any(kv_cache[key].shape[2:] != (expected_heads, self.head_dim)
+                   for key in ("k", "v")):
+                raise ValueError("Spatial SP requires self-KV cache heads to be sharded")
 
         if kv_cache is None:
-            # if it is teacher forcing training?
-            is_tf = (s == seq_lens[0].item() * 2)
+            # RoPE repeats for the clean and noisy halves of teacher forcing.
             if is_tf:
                 q_chunk = torch.chunk(q, 2, dim=1)
                 k_chunk = torch.chunk(k, 2, dim=1)
@@ -227,12 +246,12 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1
                 )
 
-                x = flex_attention(
+                x = _get_flex_attention()(
                     query=padded_roped_query.transpose(2, 1),
                     key=padded_roped_key.transpose(2, 1),
                     value=padded_v.transpose(2, 1),
                     block_mask=block_mask
-                )[:, :, :-padded_length].transpose(2, 1)
+                )[:, :, :q.shape[1]].transpose(2, 1)
 
             else:
                 roped_query = rope_apply(q, grid_sizes, freqs).type_as(v)
@@ -258,12 +277,12 @@ class CausalWanSelfAttention(nn.Module):
                     dim=1
                 )
 
-                x = flex_attention(
+                x = _get_flex_attention()(
                     query=padded_roped_query.transpose(2, 1),
                     key=padded_roped_key.transpose(2, 1),
                     value=padded_v.transpose(2, 1),
                     block_mask=block_mask
-                )[:, :, :-padded_length].transpose(2, 1)
+                )[:, :, :q.shape[1]].transpose(2, 1)
         else:
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
             current_start_frame = current_start // frame_seqlen
@@ -282,33 +301,37 @@ class CausalWanSelfAttention(nn.Module):
 
             sink_tokens = 1 * self.block_length # we keep the first block in the cache
 
-            if (num_new_tokens > 0) and (
-                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
-                num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
-                num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+            # History is a stop-gradient condition. Cache writes must not retain
+            # CopySlices graphs across rollout windows; attention below still
+            # uses the live current-window keys/values for their gradients.
+            with torch.no_grad():
+                if (num_new_tokens > 0) and (
+                        num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+                    num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+                    num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
+                    kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                        kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                    kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                        kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 
-                local_end_index = kv_cache["local_end_index"].item() + cache_end - \
-                    kv_cache["global_end_index"].item() - num_evicted_tokens
-                local_start_index = local_end_index - self.block_length
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key[:, :self.block_length]
-                kv_cache["v"][:, local_start_index:local_end_index] = v[:, :self.block_length]
-            else:
-                local_end_index = kv_cache["local_end_index"].item() + cache_end - kv_cache["global_end_index"].item()
-                local_start_index = local_end_index - self.block_length
-                if local_start_index == 0: # first block is not roped in the cache
-                    kv_cache["k"][:, local_start_index:local_end_index] = k[:, :self.block_length]
-                else:
+                    local_end_index = kv_cache["local_end_index"].item() + cache_end - \
+                        kv_cache["global_end_index"].item() - num_evicted_tokens
+                    local_start_index = local_end_index - self.block_length
                     kv_cache["k"][:, local_start_index:local_end_index] = roped_key[:, :self.block_length]
+                    kv_cache["v"][:, local_start_index:local_end_index] = v[:, :self.block_length]
+                else:
+                    local_end_index = kv_cache["local_end_index"].item() + cache_end - kv_cache["global_end_index"].item()
+                    local_start_index = local_end_index - self.block_length
+                    if local_start_index == 0: # first block is not roped in the cache
+                        kv_cache["k"][:, local_start_index:local_end_index] = k[:, :self.block_length]
+                    else:
+                        kv_cache["k"][:, local_start_index:local_end_index] = roped_key[:, :self.block_length]
 
-                kv_cache["v"][:, local_start_index:local_end_index] = v[:, :self.block_length]
+                    kv_cache["v"][:, local_start_index:local_end_index] = v[:, :self.block_length]
 
-            if num_new_tokens > 0: # prevent updating when caching clean frame
-                kv_cache["global_end_index"].fill_(cache_end)
-                kv_cache["local_end_index"].fill_(local_end_index)
+                if num_new_tokens > 0: # prevent updating when caching clean frame
+                    kv_cache["global_end_index"].fill_(cache_end)
+                    kv_cache["local_end_index"].fill_(local_end_index)
 
             if local_start_index == 0:
                 # no kv attn with cache — still apply block-causal inside the window
@@ -419,7 +442,9 @@ class CausalWanSelfAttention(nn.Module):
                     )
                  
 
-        # output
+        # The cache and attention keep global sequence order and local heads;
+        # projection/FFN operate on local spatial tokens and all channels.
+        x = head_to_sequence(x, num_frames)
         x = x.flatten(2)
         x = self.o(x)
         return x
@@ -955,6 +980,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
         assert seq_lens.max() <= seq_len
         x = torch.cat(x)
+        if get_sp_world_size() > 1:
+            num_frames = _spatial_num_frames(grid_sizes, x.shape[1])
+            x = split_spatial(x, num_frames)
         """
         torch.cat([
             torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
@@ -1027,6 +1055,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
+        if get_sp_world_size() > 1:
+            x = gather_spatial(x.flatten(1, 2), num_frames)
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
         return torch.stack(x)
@@ -1154,6 +1184,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 1, (6, self.dim)).unflatten(dim=0, sizes=t.shape)
             e0 = torch.cat([e0_clean, e0], dim=1)
 
+        if get_sp_world_size() > 1:
+            num_frames = _spatial_num_frames(
+                grid_sizes, x.shape[1], copies=2 if clean_x is not None else 1)
+            x = split_spatial(x, num_frames)
+
         # arguments
         kwargs = dict(
             e=e0,
@@ -1184,6 +1219,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # head
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
+        if get_sp_world_size() > 1:
+            x = gather_spatial(x.flatten(1, 2), int(grid_sizes[0, 0]))
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)

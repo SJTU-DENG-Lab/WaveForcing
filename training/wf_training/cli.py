@@ -12,9 +12,10 @@ import sys
 from omegaconf import OmegaConf
 
 from wf_training.config import (
-    ConfigError, STAGES, checkpoint_complete,
-    load_assets, plain, preflight, resolve_config, validate_config,
+    ConfigError, RECIPES, STAGES, checkpoint_complete,
+    load_assets, plain, preflight, recipe_defaults, resolve_config, validate_config,
 )
+from wf_training.utils.source import source_provenance
 
 _ENV_WHITELIST = (
     "CUDA_VISIBLE_DEVICES", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "WANDB_MODE",
@@ -25,16 +26,18 @@ _ENV_WHITELIST = (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="WaveForcing reference S1/S2/S3 training")
+    parser = argparse.ArgumentParser(description="WaveForcing S1/S2/S3 training")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("show-config", "preflight", "run"):
         sub = commands.add_parser(name)
         sub.add_argument("--assets", required=True, help="YAML of explicit local asset paths")
         sub.add_argument("--output", required=True, help="run root; each stage gets its own subdirectory")
         sub.add_argument("--world-size", type=int, default=8, help="local torchrun GPU count")
+        sub.add_argument("--recipe", choices=RECIPES, default="reference",
+                         help="reference (default) or experimental single-node 14B FSDP8 recipe")
         stages = sub.add_mutually_exclusive_group()
         stages.add_argument("--stage", choices=STAGES)
-        stages.add_argument("--stages", help="ordered contiguous list, e.g. s1,s2,s3; default: s2,s3")
+        stages.add_argument("--stages", help="ordered contiguous list; default: reference s2,s3; 14B s1,s2,s3")
         sub.add_argument("--init-key", help="asset key for the first stage checkpoint; never means resume")
         sub.add_argument("--set", action="append", default=[], dest="overrides",
                          help="explicit key=value or stage.key=value recipe override")
@@ -50,7 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def selected_stages(args) -> list[str]:
-    stages = [args.stage] if args.stage else (args.stages or "s2,s3").split(",")
+    defaults = recipe_defaults(getattr(args, "recipe", "reference"))
+    stages = ([args.stage] if args.stage else args.stages.split(",") if args.stages
+              else list(defaults.default_stages))
     if not stages or any(stage not in STAGES for stage in stages):
         raise ConfigError("--stages must contain s1, s2, and/or s3")
     offsets = [STAGES.index(stage) for stage in stages]
@@ -66,7 +71,8 @@ def build_plan(args) -> list:
     for stage in selected_stages(args):
         config = resolve_config(stage, assets, args.output, args.world_size,
                                 init_key=args.init_key if previous is None else None,
-                                init_checkpoint=previous, overrides=args.overrides)
+                                init_checkpoint=previous, overrides=args.overrides,
+                                recipe=getattr(args, "recipe", "reference"))
         configs.append(config)
         previous = str(Path(config.logdir) / f"checkpoint_model_{config.max_steps:06d}" / "model.pt")
     return configs
@@ -139,6 +145,7 @@ def _run(configs: list) -> None:
         _write_json(directory / "run_manifest.json", {
             "schema_version": 1, "created_at": _now(), "stage": config.stage,
             "source_path": str(Path(__file__).resolve().parent),
+            "source_provenance": source_provenance(),
             "python": sys.executable, "initial_checkpoint": report["assets"]["initial_checkpoint"],
             "environment": {key: os.environ[key] for key in _ENV_WHITELIST if key in os.environ},
         })
@@ -187,6 +194,10 @@ def _worker(args) -> None:
         properties = torch.cuda.get_device_properties(trainer.device)
         _write_json(Path(config.logdir) / f"worker_rank{rank:02d}.json", {
             "created_at": _now(), "rank": rank, "world_size": trainer.world_size,
+            "sequence_parallel_size": getattr(config, "sequence_parallel_size", 1),
+            "data_parallel_size": getattr(config, "data_parallel_size", trainer.world_size),
+            "gradient_accumulation_steps": getattr(config, "gradient_accumulation_steps", 1),
+            "effective_batch_size": config.effective_batch_size,
             "python": sys.executable, "trainer_source": str(Path(distillation.__file__).resolve()),
             "torch": torch.__version__, "cuda_build": torch.version.cuda,
             "gpu": properties.name, "gpu_memory_bytes": properties.total_memory,

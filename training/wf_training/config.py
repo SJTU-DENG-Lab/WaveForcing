@@ -1,4 +1,4 @@
-"""CPU-only configuration for the reference training recipes."""
+"""CPU-only configuration for reference and experimental 14B training."""
 from __future__ import annotations
 
 import importlib.metadata
@@ -13,6 +13,8 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf
 
 STAGES = ("s1", "s2", "s3")
+RECIPES = ("reference", "14b-fsdp8", "14b-fsdp8-smoke",
+           "14b-fsdp8-sp4", "14b-fsdp8-sp4-smoke")
 _PATH_FIELDS = {
     "model_root", "data_path", "generator_ckpt", "paired_manifest",
     "paired_validation_manifest", "logdir", "wandb_save_dir", "resume_from",
@@ -50,6 +52,17 @@ def _resource(name: str) -> DictConfig:
     return OmegaConf.create(content)
 
 
+def recipe_defaults(recipe: str = "reference") -> DictConfig:
+    if recipe not in RECIPES:
+        raise ConfigError(f"unsupported recipe: {recipe}")
+    if recipe == "reference":
+        return OmegaConf.create({
+            "default_stages": ["s2", "s3"],
+            "init_keys": {"s1": "ode_init", "s2": "rf_init", "s3": "s3_init"},
+        })
+    return _resource(recipe)
+
+
 def parse_denoising_step_list(value: Any) -> list[int]:
     try:
         raw = list(value)
@@ -70,12 +83,17 @@ def parse_denoising_step_list(value: Any) -> list[int]:
 def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
                    world_size: int = 8,
                    init_key: str | None = None, init_checkpoint: str | None = None,
-                   overrides: list[str] | None = None) -> DictConfig:
+                   overrides: list[str] | None = None,
+                   recipe: str = "reference") -> DictConfig:
     if stage not in STAGES:
         raise ConfigError(f"unsupported stage: {stage}")
     if world_size < 1:
         raise ConfigError("world_size must be positive")
-    config = OmegaConf.merge(_resource("base"), _resource(stage))
+    defaults = recipe_defaults(recipe)
+    if recipe == "reference":
+        config = OmegaConf.merge(_resource("base"), _resource(stage))
+    else:
+        config = OmegaConf.merge(defaults.common, defaults.stages[stage])
     selected_overrides = []
     for override in overrides or []:
         prefix, dot, tail = override.partition(".")
@@ -92,7 +110,7 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
     if stage == "s2":
         required += ["paired_train", "paired_val"]
     if not init_checkpoint:
-        init_key = init_key or {"s1": "ode_init", "s2": "rf_init", "s3": "s3_init"}[stage]
+        init_key = init_key or defaults.init_keys[stage]
         required += [init_key]
     missing = [key for key in required if key not in assets]
     if missing:
@@ -100,9 +118,17 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
     run_dir = Path(output).expanduser().resolve() / stage
     config.stage = stage
     config.denoising_step_list = parse_denoising_step_list(config.denoising_step_list)
-    config.recipe_id = f"wf_{stage}"
+    config.recipe = recipe
+    recipe_prefix = "wf_14b_fsdp8_sp4" if "-sp4" in recipe else "wf_14b_fsdp8"
+    config.recipe_id = (f"wf_{stage}" if recipe == "reference" else
+                        f"{recipe_prefix}_experimental_"
+                        + ("smoke_" if recipe.endswith("-smoke") else "") + stage)
     config.world_size = world_size
-    config.effective_batch_size = world_size * config.batch_size
+    sp_size, accumulation = _parallel_sizes(config)
+    config.sequence_parallel_size = sp_size
+    config.gradient_accumulation_steps = accumulation
+    config.data_parallel_size = world_size // sp_size
+    config.effective_batch_size = config.data_parallel_size * config.batch_size * accumulation
     config.model_root = assets["model_root"]
     config.data_path = assets["prompts"]
     config.generator_ckpt = init_checkpoint or assets[init_key]
@@ -118,14 +144,74 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
     return config
 
 
+def _parallel_sizes(config: DictConfig) -> tuple[int, int]:
+    values = []
+    for key in ("sequence_parallel_size", "gradient_accumulation_steps"):
+        value = getattr(config, key, 1)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value < 1 or int(value) != value):
+            raise ConfigError(f"{key} must be a positive integer")
+        values.append(int(value))
+    if config.world_size % values[0]:
+        raise ConfigError("world_size must be divisible by sequence_parallel_size")
+    return values[0], values[1]
+
+
 def validate_config(config: DictConfig) -> None:
     if config.stage not in STAGES:
         raise ConfigError("invalid stage")
     steps = parse_denoising_step_list(config.denoising_step_list)
+    recipe = getattr(config, "recipe", "reference")
+    recipe_defaults(recipe)
+    if int(config.world_size) != config.world_size or config.world_size < 1:
+        raise ConfigError("world_size must be a positive integer")
+    sp_size, accumulation = _parallel_sizes(config)
+    expected_sp = 4 if "-sp4" in recipe else 1
+    if sp_size != expected_sp or accumulation != expected_sp:
+        raise ConfigError(
+            f"{recipe} requires sequence_parallel_size={expected_sp} and "
+            f"gradient_accumulation_steps={expected_sp}"
+        )
+    dp_size = config.world_size // sp_size
+    if getattr(config, "data_parallel_size", dp_size) != dp_size:
+        raise ConfigError("data_parallel_size must equal world_size / sequence_parallel_size")
+    if getattr(config, "fsdp_init_mode", "replicated") not in ("replicated", "rank0"):
+        raise ConfigError("fsdp_init_mode must be replicated or rank0")
+    if getattr(config, "ema_mode", "full") not in ("full", "sharded"):
+        raise ConfigError("ema_mode must be full or sharded")
+    if not isinstance(getattr(config, "profile_memory", False), bool):
+        raise ConfigError("profile_memory must be boolean")
+    ema_start = config.ema_start_step
+    if (isinstance(ema_start, bool) or not isinstance(ema_start, (int, float))
+            or not math.isfinite(ema_start) or int(ema_start) != ema_start or ema_start < 0):
+        raise ConfigError("ema_start_step must be a nonnegative integer")
+    ema_weight = config.ema_weight
+    if ema_weight is not None and (
+        isinstance(ema_weight, bool) or not isinstance(ema_weight, (int, float))
+        or not math.isfinite(ema_weight) or not 0 <= ema_weight < 1
+    ):
+        raise ConfigError("ema_weight must be null or a finite number in [0, 1); 0 disables EMA")
+    if recipe != "reference":
+        if config.world_size != 8:
+            raise ConfigError("14b-fsdp8 recipes require one node with exactly 8 ranks")
+        if any(config[name] != "Wan2.1-T2V-14B"
+               for name in ("generator_name", "real_name", "fake_name")):
+            raise ConfigError("14b-fsdp8 generator, real score, and fake score must all be 14B")
+        if steps != [1000, 750, 500, 250] or not config.warp_denoising_step:
+            raise ConfigError("14b-fsdp8 requires the native four-step table with warping")
+        if (config.timestep_shift != 5.0 or config.model_kwargs.timestep_shift != 5.0
+                or config.num_train_timestep != 1000 or config.ts_schedule):
+            raise ConfigError("14b-fsdp8 requires shift 5, 1000 timesteps, and ts_schedule=false")
+        if (config.sharding_strategy != "full" or config.fsdp_init_mode != "rank0"
+                or config.ema_mode != "sharded"):
+            raise ConfigError("14b-fsdp8 requires full FSDP, rank0 initialization, and sharded EMA")
+        if config.mixed_precision is not True or config.gradient_checkpointing is not True:
+            raise ConfigError("14b-fsdp8 requires mixed precision and gradient checkpointing")
     if config.seed <= 0 or int(config.seed) != config.seed:
         raise ConfigError("seed must be a fixed positive integer (seed=0 is random)")
-    if config.batch_size != 1 or config.effective_batch_size != config.world_size:
-        raise ConfigError("reference recipes use batch_size=1, effective batch=world_size")
+    if (config.batch_size != 1
+            or config.effective_batch_size != dp_size * config.batch_size * accumulation):
+        raise ConfigError("recipes require batch_size=1, effective batch=DP * batch * accumulation")
     if "total_batch_size" in config:
         raise ConfigError("total_batch_size was unused; use the explicit effective batch")
     if config.attention_mode not in ("full", "strict"):
@@ -208,6 +294,30 @@ def _paired_record(path: Path, expected: int) -> dict[str, Any]:
     return record
 
 
+def _native_14b_config(path: Path) -> dict[str, Any]:
+    """Check the native architecture without importing torch or reading weights."""
+    try:
+        native = json.loads(path.read_text())
+    except (ValueError, OSError) as error:
+        raise ConfigError(f"invalid native Wan model configuration: {path}") from error
+    if not isinstance(native, dict):
+        raise ConfigError(f"native Wan configuration must be a mapping: {path}")
+    expected = {"model_type": "t2v", "dim": 5120, "ffn_dim": 13824,
+                "num_heads": 40, "num_layers": 40, "in_dim": 16, "out_dim": 16}
+    for name, value in expected.items():
+        if native.get(name) != value:
+            raise ConfigError(
+                f"14B native config {path}: {name} must be {value!r}, got {native.get(name)!r}"
+            )
+    # Native Wan omits these entries via ignore_for_config; the constructor
+    # defaults are part of the checked latent/text contract.
+    patch_size = native.get("patch_size", [1, 2, 2])
+    if patch_size != [1, 2, 2] or native.get("text_dim", 4096) != 4096:
+        raise ConfigError(f"14B native config has incompatible latent patches or text features: {path}")
+    return {**expected, "patch_size": patch_size, "text_dim": native.get("text_dim", 4096),
+            "latent_shape_contract": [21, 16, 60, 104], "weights_loaded": False}
+
+
 def preflight(config: DictConfig, *, allow_pending_init: bool = False) -> dict[str, Any]:
     """Static checks only: no CUDA, model loading, or tensor-value verification."""
     validate_config(config)
@@ -220,6 +330,8 @@ def preflight(config: DictConfig, *, allow_pending_init: bool = False) -> dict[s
             raise ConfigError(f"no safetensors model shards in {model}")
         records[name] = {"config": _file_record(model / "config.json"),
                          "weights": [_file_record(p) for p in weights]}
+        if getattr(config, "recipe", "reference") != "reference":
+            records[name]["architecture"] = _native_14b_config(model / "config.json")
     student = root / config.generator_name
     for name in ("Wan2.1_VAE.pth", "models_t5_umt5-xxl-enc-bf16.pth"):
         records[name] = _file_record(student / name)
@@ -271,6 +383,9 @@ def checkpoint_complete(path: str | Path, config: DictConfig,
     marker = json.loads(marker_path.read_text())
     if marker.get("world_size") != config.world_size:
         raise ConfigError("resume checkpoint world_size differs from the saved configuration")
+    for name in ("sequence_parallel_size", "gradient_accumulation_steps"):
+        if marker.get(name, 1) != getattr(config, name, 1):
+            raise ConfigError(f"resume checkpoint {name} differs from the saved configuration")
     if expected_step is not None and marker.get("step") != expected_step:
         raise ConfigError("stage endpoint checkpoint has the wrong iteration")
     expected_files = [f"trainer_state_rank{rank:02d}.pt" for rank in range(config.world_size)]

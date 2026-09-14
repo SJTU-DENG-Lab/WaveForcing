@@ -1,8 +1,14 @@
-from wf_training.utils.wan_wrapper import WanDiffusionWrapper
+from __future__ import annotations
+
 from wf_training.utils.scheduler import SchedulerInterface
-from typing import List, Optional
+from wf_training.utils.cache import TrainingKVCache
+from wf_training.utils.sequence_parallel import get_sp_world_size, sp_broadcast
+from typing import TYPE_CHECKING, List, Optional
 import torch
 import torch.distributed as dist
+
+if TYPE_CHECKING:
+    from wf_training.utils.wan_wrapper import WanDiffusionWrapper
 
 
 class RollingForcingTrainingPipeline:
@@ -29,16 +35,37 @@ class RollingForcingTrainingPipeline:
         generator_model = generator_module.model
         self.num_transformer_blocks = len(generator_model.blocks)
         self.num_attention_heads = generator_model.num_heads
+        sp_size = get_sp_world_size()
+        if self.num_attention_heads % sp_size:
+            raise ValueError("attention heads must be divisible by sequence parallel size")
+        # Self-KV stores the full history for this rank's attention heads.
+        # Cross-attention keeps its small full text KV in a separate cache.
+        self.num_attention_heads //= sp_size
         self.attention_head_dim = generator_model.dim // generator_model.num_heads
         self.frame_seq_length = 1560
         self.num_frame_per_block = num_frame_per_block
         self.context_noise = context_noise
 
-        self.kv_cache_clean = None
+        self._caches = TrainingKVCache()
         self.independent_first_frame = independent_first_frame
         self.same_step_across_blocks = same_step_across_blocks
         self.last_step_only = last_step_only
         self.kv_cache_size = num_max_frames * self.frame_seq_length
+
+    @property
+    def kv_cache_clean(self):
+        return self._caches.kv
+
+    @property
+    def crossattn_cache(self):
+        return self._caches.crossattn
+
+    def reserve_caches_for_backward(self, output):
+        self._caches.reserve_for_backward(output)
+
+    def release_caches(self):
+        """Allow reuse after backward; leave tensors untouched until next reset."""
+        self._caches.release_after_backward()
 
     def generate_and_sync_list(self, num_blocks, num_denoising_steps, device):
         rank = dist.get_rank() if dist.is_initialized() else 0
@@ -233,7 +260,7 @@ class RollingForcingTrainingPipeline:
                                     (block_idx+1) * self.num_frame_per_block] = \
                         self.scheduler.add_noise(
                             denoised_pred.flatten(0, 1),
-                            torch.randn_like(denoised_pred.flatten(0, 1)),
+                            sp_broadcast(torch.randn_like(denoised_pred.flatten(0, 1))),
                             next_timestep * torch.ones(
                                 [batch_size * current_num_frames], device=noise.device, dtype=torch.long)
                         ).unflatten(0, denoised_pred.shape[:2])[:, (block_idx - start_block)*self.num_frame_per_block:
@@ -269,6 +296,7 @@ class RollingForcingTrainingPipeline:
         denoised_timestep_from, denoised_timestep_to = None, None
 
 
+        self.reserve_caches_for_backward(output)
         return output, denoised_timestep_from, denoised_timestep_to
 
 
@@ -381,7 +409,7 @@ class RollingForcingTrainingPipeline:
                         next_timestep = self.denoising_step_list[index + 1]
                         noisy_input = self.scheduler.add_noise(
                             denoised_pred.flatten(0, 1),
-                            torch.randn_like(denoised_pred.flatten(0, 1)),
+                            sp_broadcast(torch.randn_like(denoised_pred.flatten(0, 1))),
                             next_timestep * torch.ones(
                                 [batch_size * current_num_frames], device=noise.device, dtype=torch.long)
                         ).unflatten(0, denoised_pred.shape[:2])
@@ -417,7 +445,7 @@ class RollingForcingTrainingPipeline:
             # add context noise
             denoised_pred = self.scheduler.add_noise(
                 denoised_pred.flatten(0, 1),
-                torch.randn_like(denoised_pred.flatten(0, 1)),
+                sp_broadcast(torch.randn_like(denoised_pred.flatten(0, 1))),
                 context_timestep * torch.ones(
                     [batch_size * current_num_frames], device=noise.device, dtype=torch.long)
             ).unflatten(0, denoised_pred.shape[:2])
@@ -449,53 +477,20 @@ class RollingForcingTrainingPipeline:
                 (self.scheduler.timesteps.cuda() - self.denoising_step_list[exit_flags[0]].cuda()).abs(), dim=0).item()
 
 
+        self.reserve_caches_for_backward(output)
         if return_sim_step:
             return output, denoised_timestep_from, denoised_timestep_to, exit_flags[0] + 1
 
         return output, denoised_timestep_from, denoised_timestep_to
 
     def _initialize_kv_cache(self, batch_size, dtype, device):
-        """
-        Initialize a Per-GPU KV cache for the Wan model.
-        """
-        kv_cache_clean = []
-
-        for _ in range(self.num_transformer_blocks):
-            kv_cache_clean.append({
-                "k": torch.zeros(
-                    [batch_size, self.kv_cache_size, self.num_attention_heads, self.attention_head_dim],
-                    dtype=dtype,
-                    device=device,
-                ),
-                "v": torch.zeros(
-                    [batch_size, self.kv_cache_size, self.num_attention_heads, self.attention_head_dim],
-                    dtype=dtype,
-                    device=device,
-                ),
-                "global_end_index": torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index": torch.tensor([0], dtype=torch.long, device=device)
-            })
-
-        self.kv_cache_clean = kv_cache_clean  # always store the clean cache
+        """Reset storage from a completed prediction, allocating only if needed."""
+        self._caches.reset_kv(
+            self.num_transformer_blocks,
+            [batch_size, self.kv_cache_size, self.num_attention_heads, self.attention_head_dim],
+            dtype, device,
+        )
 
     def _initialize_crossattn_cache(self, batch_size, dtype, device):
-        """
-        Initialize a Per-GPU cross-attention cache for the Wan model.
-        """
-        crossattn_cache = []
-
-        for _ in range(self.num_transformer_blocks):
-            crossattn_cache.append({
-                "k": torch.zeros(
-                    [batch_size, 512, self.num_attention_heads, self.attention_head_dim],
-                    dtype=dtype,
-                    device=device,
-                ),
-                "v": torch.zeros(
-                    [batch_size, 512, self.num_attention_heads, self.attention_head_dim],
-                    dtype=dtype,
-                    device=device,
-                ),
-                "is_init": False
-            })
-        self.crossattn_cache = crossattn_cache
+        """Invalidate old text keys/values; the attention module fills the slots."""
+        self._caches.reset_crossattn(self.num_transformer_blocks)

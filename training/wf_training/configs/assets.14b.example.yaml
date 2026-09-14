@@ -1,0 +1,20 @@
+# Copy outside the source tree and replace every placeholder with your paths.
+# Native Wan directory: <model_root>/Wan2.1-T2V-14B/config.json and all shards,
+# UMT5 encoder/tokenizer, and Wan2.1_VAE.pth. Diffusers layout is unsupported.
+model_root: /path/to/owned/native-wan-models
+prompts: /path/to/vidprom_filtered_extended.txt
+
+# Candidate: bidirectional four-step StepDistill/CfgDistill initialization.
+# This is NOT a verified 14B causal ODE or WaveForcing checkpoint. Its 14B
+# S1/S2/S3 adaptation has not passed GPU acceptance or quality evaluation.
+distill_init_14b: /path/to/self_forcing_plus_14b_distill.pt
+
+# Reuse only after checking teacher recipe, latent shape, prompts, seeds,
+# hashes, and the 2048/128 train/validation split.
+paired_train: /path/to/pairs/manifest_train.jsonl
+paired_val: /path/to/pairs/manifest_val.jsonl
+
+# Only required when starting S2 or S3 as the first selected stage.
+# Sequential --stages s1,s2,s3 supplies prior raw generator endpoints itself.
+s2_init_14b: /path/to/14b-s1/checkpoint_model_003000/model.pt
+s3_init_14b: /path/to/14b-s2/checkpoint_model_001000/model.pt

@@ -7,6 +7,9 @@ real_score_fsdp_wrap_strategy: size
 fake_score_fsdp_wrap_strategy: size
 text_encoder_fsdp_wrap_strategy: size
 sharding_strategy: hybrid_full
+fsdp_init_mode: replicated
+ema_mode: full
+profile_memory: false
 mixed_precision: true
 batch_size: 1
 lr: 1.5e-6

@@ -20,7 +20,24 @@ def fsdp_state_dict(model):
     return checkpoint
 
 
-def fsdp_wrap(module, sharding_strategy="full", mixed_precision=False, wrap_strategy="size", min_num_params=int(5e7), transformer_module=None, cpu_offload=False):
+def materialize_meta_parameters(module, device):
+    """Materialize this module only; FSDP visits children separately.
+
+    Real buffers (and Wan's unregistered RoPE tensors) must retain their
+    initialized values. Only parameters/buffers actually on meta are empty.
+    """
+    for name, parameter in module.named_parameters(recurse=False):
+        if parameter.is_meta:
+            module._parameters[name] = torch.nn.Parameter(
+                torch.empty_like(parameter, device=device),
+                requires_grad=parameter.requires_grad,
+            )
+    for name, buffer in module.named_buffers(recurse=False):
+        if buffer.is_meta:
+            module._buffers[name] = torch.empty_like(buffer, device=device)
+
+
+def fsdp_wrap(module, sharding_strategy="full", mixed_precision=False, wrap_strategy="size", min_num_params=int(5e7), transformer_module=None, cpu_offload=False, sync_module_states=False):
     if mixed_precision:
         mixed_precision_policy = MixedPrecision(
             param_dtype=torch.bfloat16,
@@ -62,7 +79,10 @@ def fsdp_wrap(module, sharding_strategy="full", mixed_precision=False, wrap_stra
         limit_all_gathers=True,
         use_orig_params=True,
         cpu_offload=CPUOffload(offload_params=cpu_offload),
-        sync_module_states=False  # Load ckpt on rank 0 and sync to other ranks
+        sync_module_states=sync_module_states,
+        param_init_fn=(partial(materialize_meta_parameters,
+                               device=torch.device("cuda", torch.cuda.current_device()))
+                       if sync_module_states else None),
     )
     return module
 
@@ -89,10 +109,11 @@ def launch_distributed_job(backend: str = "nccl"):
 
 
 class EMA_FSDP:
-    def __init__(self, fsdp_module: torch.nn.Module, decay: float = 0.999):
+    def __init__(self, fsdp_module: torch.nn.Module, decay: float = 0.999, *, initialize=True):
         self.decay = decay
         self.shadow = {}
-        self._init_shadow(fsdp_module)
+        if initialize:
+            self._init_shadow(fsdp_module)
 
     @torch.no_grad()
     def _init_shadow(self, fsdp_module):

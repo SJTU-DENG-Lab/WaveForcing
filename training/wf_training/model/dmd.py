@@ -2,8 +2,10 @@ from wf_training.pipeline import RollingForcingTrainingPipeline
 import torch.nn.functional as F
 from typing import Optional, Tuple
 import torch
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from wf_training.model.base import RollingForcingModel
+from wf_training.utils.sequence_parallel import sp_broadcast
 
 
 class DMD(RollingForcingModel):
@@ -18,12 +20,15 @@ class DMD(RollingForcingModel):
         self.same_step_across_blocks = getattr(args, "same_step_across_blocks", True)
         self.num_training_frames = getattr(args, "num_training_frames", 21)
 
+        generator_model = self.generator.model
+        while isinstance(generator_model, FSDP):
+            generator_model = generator_model.module
         if self.num_frame_per_block > 1:
-            self.generator.model.num_frame_per_block = self.num_frame_per_block
+            generator_model.num_frame_per_block = self.num_frame_per_block
 
         self.independent_first_frame = getattr(args, "independent_first_frame", False)
         if self.independent_first_frame:
-            self.generator.model.independent_first_frame = True
+            generator_model.independent_first_frame = True
         if args.gradient_checkpointing:
             self.generator.enable_gradient_checkpointing()
             if self.fake_score is not None:
@@ -173,7 +178,7 @@ class DMD(RollingForcingModel):
                     (1 + (self.timestep_shift - 1) * (timestep / 1000)) * 1000
             timestep = timestep.clamp(self.min_step, self.max_step)
 
-            noise = torch.randn_like(image_or_video)
+            noise = sp_broadcast(torch.randn_like(image_or_video))
             noisy_latent = self.scheduler.add_noise(
                 image_or_video.flatten(0, 1),
                 noise.flatten(0, 1),
@@ -287,7 +292,7 @@ class DMD(RollingForcingModel):
 
         critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
 
-        critic_noise = torch.randn_like(generated_image)
+        critic_noise = sp_broadcast(torch.randn_like(generated_image))
         noisy_generated_image = self.scheduler.add_noise(
             generated_image.flatten(0, 1),
             critic_noise.flatten(0, 1),

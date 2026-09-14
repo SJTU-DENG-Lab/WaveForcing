@@ -15,7 +15,8 @@ from wf_training.wan.modules.causal_model import CausalWanModel
 
 
 class WanTextEncoder(torch.nn.Module):
-    def __init__(self, model_name="Wan2.1-T2V-1.3B") -> None:
+    def __init__(self, model_name="Wan2.1-T2V-1.3B", *, load_pretrained=True,
+                 init_device="cpu") -> None:
         super().__init__()
         self.model_name = model_name
 
@@ -23,12 +24,12 @@ class WanTextEncoder(torch.nn.Module):
             encoder_only=True,
             return_tokenizer=False,
             dtype=torch.float32,
-            device=torch.device('cpu')
+            device=torch.device(init_device)
         ).eval().requires_grad_(False)
-        self.text_encoder.load_state_dict(
-            torch.load(str(Path(model_directory(self.model_name)) / "models_t5_umt5-xxl-enc-bf16.pth"),
-                       map_location='cpu', weights_only=False)
-        )
+        if load_pretrained:
+            from wf_training.utils.checkpoint import load_model_checkpoint
+            self.text_encoder.load_state_dict(load_model_checkpoint(
+                Path(model_directory(self.model_name)) / "models_t5_umt5-xxl-enc-bf16.pth"))
 
         self.tokenizer = HuggingfaceTokenizer(
             name=str(Path(model_directory(self.model_name)) / "google/umt5-xxl"), seq_len=512, clean='whitespace')
@@ -124,12 +125,18 @@ class WanDiffusionWrapper(torch.nn.Module):
             timestep_shift=8.0,
             is_causal=False,
             local_attn_size=-1,
-            sink_size=0
+            sink_size=0,
+            load_pretrained=True,
     ):
         super().__init__()
         self.model_name = model_name
 
-        if is_causal:
+        if not load_pretrained:
+            model_class = CausalWanModel if is_causal else WanModel
+            model_config = model_class.load_config(model_directory(model_name))
+            kwargs = dict(local_attn_size=local_attn_size, sink_size=sink_size) if is_causal else {}
+            self.model = model_class.from_config(model_config, **kwargs)
+        elif is_causal:
             self.model = CausalWanModel.from_pretrained(
                 model_directory(model_name), local_attn_size=local_attn_size, sink_size=sink_size)
         else:

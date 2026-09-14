@@ -8,8 +8,32 @@ from diffusers.models.modeling_utils import ModelMixin
 from einops import repeat
 
 from .attention import flash_attention
+from wf_training.utils.sequence_parallel import (
+    get_sp_world_size,
+    split_spatial,
+    gather_spatial,
+    sequence_to_head,
+    head_to_sequence,
+)
 
 __all__ = ['WanModel']
+
+
+def _spatial_num_frames(grid_sizes, sequence_length, copies=1):
+    """Validate the common, unpadded frame grid required by spatial SP.
+
+    Grid sizes and sequence lengths always describe the global video. Only
+    hidden states between patch embedding and the output head are sharded.
+    """
+    grids = grid_sizes.tolist()
+    if not grids or any(grid != grids[0] for grid in grids):
+        raise ValueError("Spatial SP requires identical video grids within a batch")
+    frames, height, width = grids[0]
+    if frames <= 0 or height * width % get_sp_world_size():
+        raise ValueError("Per-frame spatial tokens must be divisible by SP size")
+    if sequence_length != copies * frames * height * width:
+        raise ValueError("Spatial SP requires unpadded frame-major token sequences")
+    return copies * frames
 
 
 def sinusoidal_embedding_1d(dim, position):
@@ -142,6 +166,11 @@ class WanSelfAttention(nn.Module):
             return q, k, v
 
         q, k, v = qkv_fn(x)
+        # RMSNorm above spans every channel, before heads are distributed.
+        num_frames = int(grid_sizes[0, 0])
+        q = sequence_to_head(q, num_frames)
+        k = sequence_to_head(k, num_frames)
+        v = sequence_to_head(v, num_frames)
 
         x = flash_attention(
             q=rope_apply(q, grid_sizes, freqs),
@@ -150,7 +179,8 @@ class WanSelfAttention(nn.Module):
             k_lens=seq_lens,
             window_size=self.window_size)
 
-        # output
+        # Restore each rank's spatial tokens and all heads before projection.
+        x = head_to_sequence(x, num_frames)
         x = x.flatten(2)
         x = self.o(x)
         return x
@@ -672,6 +702,8 @@ class WanModel(ModelMixin, ConfigMixin):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
+        if get_sp_world_size() > 1 and classify_mode:
+            raise NotImplementedError("GAN feature classification is not supported with spatial SP")
         if self.model_type == 'i2v':
             assert clip_fea is not None and y is not None
         # params
@@ -689,10 +721,16 @@ class WanModel(ModelMixin, ConfigMixin):
         x = [u.flatten(2).transpose(1, 2) for u in x]
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
         assert seq_lens.max() <= seq_len
-        x = torch.cat([
-            torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
-                      dim=1) for u in x
-        ])
+        # Padding queries are discarded by unpatchify. Avoid distributing that
+        # padding as if it were real per-frame spatial positions.
+        if get_sp_world_size() > 1:
+            num_frames = _spatial_num_frames(grid_sizes, int(seq_lens[0]))
+            x = split_spatial(torch.cat(x), num_frames)
+        else:
+            x = torch.cat([
+                torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
+                          dim=1) for u in x
+            ])
 
         # time embeddings
         # with amp.autocast(dtype=torch.float32):
@@ -762,8 +800,10 @@ class WanModel(ModelMixin, ConfigMixin):
             else:
                 final_x = cls_pred_branch(final_x.view(final_x.shape[0], -1))
 
-        # head
+        # Gather only the small latent prediction, not the full hidden state.
         x = self.head(x, e)
+        if get_sp_world_size() > 1:
+            x = gather_spatial(x, num_frames)
 
         # unpatchify
         x = self.unpatchify(x, grid_sizes)
@@ -805,6 +845,8 @@ class WanModel(ModelMixin, ConfigMixin):
             List[Tensor]:
                 List of video features with original input shapes [C_block, F, H / 8, W / 8]
         """
+        if get_sp_world_size() > 1:
+            raise NotImplementedError("Feature extraction is not supported with spatial SP")
         if self.model_type == 'i2v':
             assert clip_fea is not None and y is not None
         # params

@@ -26,6 +26,11 @@ batch equal to the rank count.
 
 Larger students, other resolutions, image-to-video, and multi-node launches are not part of this release and require future progress.
 
+Experimental single-node 14B FSDP8 recipes are documented in
+[README_14B.md](README_14B.md). The FSDP8/SP4 implementation passed
+an eight-H200 S1/S2/S3 smoke and S2 restart check. Long-run stability
+and generation-quality acceptance remain pending.
+
 ## Recipe
 
 The default five-step schedule starts from the official RollingForcing

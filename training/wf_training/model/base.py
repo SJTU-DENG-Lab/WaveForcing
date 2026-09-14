@@ -6,6 +6,7 @@ import torch
 
 from wf_training.pipeline import RollingForcingTrainingPipeline
 from wf_training.utils.loss import get_denoising_loss
+from wf_training.utils.sequence_parallel import sp_broadcast
 from wf_training.utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 
 
@@ -27,6 +28,13 @@ class BaseModel(nn.Module):
         self.real_model_name = getattr(args, "real_name", "Wan2.1-T2V-1.3B")
         self.fake_model_name = getattr(args, "fake_name", "Wan2.1-T2V-1.3B")
         self.generator_name = getattr(args, "generator_name", "Wan2.1-T2V-1.3B")
+
+        if getattr(args, "fsdp_init_mode", "replicated") == "rank0":
+            from wf_training.utils.model_init import initialize_rank0_models
+            initialize_rank0_models(self, args, device)
+            self.scheduler = self.generator.get_scheduler()
+            self.scheduler.timesteps = self.scheduler.timesteps.to(device)
+            return
 
         self.generator = WanDiffusionWrapper(
             **getattr(args, "model_kwargs", {}),
@@ -72,7 +80,7 @@ class BaseModel(nn.Module):
                 device=self.device,
                 dtype=torch.long
             ).repeat(1, num_frame)
-            return timestep
+            return sp_broadcast(timestep)
         else:
             timestep = torch.randint(
                 min_timestep,
@@ -96,7 +104,7 @@ class BaseModel(nn.Module):
                     timestep.shape[0], -1, num_frame_per_block)
                 timestep[:, :, 1:] = timestep[:, :, 0:1]
                 timestep = timestep.reshape(timestep.shape[0], -1)
-            return timestep
+            return sp_broadcast(timestep)
 
 
 class RollingForcingModel(BaseModel):
@@ -148,8 +156,8 @@ class RollingForcingModel(BaseModel):
         noise_shape[1] = num_generated_frames
 
         pred_image_or_video, denoised_timestep_from, denoised_timestep_to = self._consistency_backward_simulation(
-            noise=torch.randn(noise_shape,
-                              device=self.device, dtype=self.dtype),
+            noise=sp_broadcast(torch.randn(noise_shape,
+                              device=self.device, dtype=self.dtype)),
             **conditional_dict,
         )
         # Slice last 21 frames

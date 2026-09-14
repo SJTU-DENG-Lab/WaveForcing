@@ -12,6 +12,8 @@ import torch.nn.functional as F
 
 from wf_training.model.dmd import DMD
 from wf_training.pipeline import RollingForcingTrainingPipeline
+from wf_training.utils.cache import offpolicy_cache_frames
+from wf_training.utils.sequence_parallel import sp_broadcast
 
 
 class OffPolicyDMD(DMD):
@@ -41,10 +43,12 @@ class OffPolicyDMD(DMD):
             self.lpips_net.eval()
         return self.lpips_net
 
-    def _get_pipeline(self):
+    def _get_pipeline(self, total_frames):
+        num_frames_needed = offpolicy_cache_frames(
+            total_frames, self.max_context_blocks,
+            len(self.denoising_step_list), self.num_frame_per_block,
+        )
         if self._offp_pipeline is None:
-            num_frames_needed = (self.max_context_blocks +
-                                 len(self.denoising_step_list)) * self.num_frame_per_block
             self._offp_pipeline = RollingForcingTrainingPipeline(
                 denoising_step_list=self.denoising_step_list,
                 scheduler=self.scheduler,
@@ -56,6 +60,9 @@ class OffPolicyDMD(DMD):
                 num_max_frames=num_frames_needed,
                 context_noise=self.args.context_noise,
             )
+        else:
+            self._offp_pipeline.kv_cache_size = (
+                num_frames_needed * self._offp_pipeline.frame_seq_length)
         return self._offp_pipeline
 
     def _window_timesteps(self, batch_size, num_window_blocks, device):
@@ -88,7 +95,7 @@ class OffPolicyDMD(DMD):
         total_blocks = total_frames // fpb
         assert total_blocks > num_window_blocks
 
-        pipe = self._get_pipeline()
+        pipe = self._get_pipeline(total_frames)
         pipe._initialize_kv_cache(
             batch_size=batch_size, dtype=self.dtype, device=self.device)
         pipe._initialize_crossattn_cache(
@@ -123,7 +130,7 @@ class OffPolicyDMD(DMD):
             :, start_block * fpb:(start_block + num_window_blocks) * fpb
         ].to(device=self.device, dtype=self.dtype)
         timestep = self._window_timesteps(batch_size, num_window_blocks, self.device)
-        noise = torch.randn_like(window_clean)
+        noise = sp_broadcast(torch.randn_like(window_clean))
         noisy_window = self.scheduler.add_noise(
             window_clean.flatten(0, 1),
             noise.flatten(0, 1),
@@ -140,6 +147,7 @@ class OffPolicyDMD(DMD):
                 crossattn_cache=pipe.crossattn_cache,
                 current_start=start_block * fpb * pipe.frame_seq_length,
             )
+        pipe.reserve_caches_for_backward(pred)
         return pred, window_clean
 
     # ------------------------------------------------------------- LPIPS
@@ -157,7 +165,7 @@ class OffPolicyDMD(DMD):
         # batch subset: 只取部分样本做 LPIPS（DMD v1 用法）
         bs = pred.shape[0]
         n_sub = max(1, int(bs * self.lpips_subset_ratio))
-        idx = torch.randperm(bs, device=pred.device)[:n_sub]
+        idx = sp_broadcast(torch.randperm(bs, device=pred.device))[:n_sub]
         pred = pred[idx]
         window_clean = window_clean[idx]
 
@@ -254,7 +262,7 @@ class OffPolicyDMD(DMD):
                 1 + (self.timestep_shift - 1) * (critic_timestep / 1000)) * 1000
         critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
 
-        critic_noise = torch.randn_like(generated_image)
+        critic_noise = sp_broadcast(torch.randn_like(generated_image))
         noisy_generated_image = self.scheduler.add_noise(
             generated_image.flatten(0, 1),
             critic_noise.flatten(0, 1),
