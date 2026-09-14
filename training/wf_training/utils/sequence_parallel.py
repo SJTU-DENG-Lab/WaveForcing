@@ -217,6 +217,91 @@ def sequence_to_head(x, num_frames):
     return _SpatialHeadExchange.apply(x, num_frames, _SP_GROUP, _SP_SIZE, True)
 
 
+def _exchange_qkv(tensors, num_frames, group, size, to_head):
+    # Missing output gradients still occupy their slots in the collective.
+    prototype = next(tensor for tensor in tensors if tensor is not None)
+    batch, sequence, heads, head_dim = prototype.shape
+    if to_head:
+        local_spatial, local_heads = sequence // num_frames, heads // size
+        view_shape = (batch, num_frames, local_spatial, size, local_heads, head_dim)
+        permutation = (3, 0, 1, 2, 4, 5)
+    else:
+        local_spatial, local_heads = sequence // num_frames // size, heads
+        view_shape = (batch, num_frames, size, local_spatial, local_heads, head_dim)
+        permutation = (2, 0, 1, 3, 4, 5)
+    # Fill destination-major QKV slots directly: no intermediate cat/stack
+    # allocation, and each destination receives all three tensors together.
+    packed = prototype.new_empty((size, 3, batch, num_frames,
+                                  local_spatial, local_heads, head_dim))
+    for index, tensor in enumerate(tensors):
+        if tensor is None:
+            packed[:, index].zero_()
+        else:
+            packed[:, index].copy_(tensor.reshape(view_shape).permute(permutation))
+    received = torch.empty_like(packed)
+    dist.all_to_all_single(received, packed, group=group)
+    del packed
+
+    if to_head:
+        # Received rank indexes space, inside each frame, rather than time.
+        permutation = (1, 2, 0, 3, 4, 5)
+        output_shape = (batch, num_frames * size * local_spatial, local_heads, head_dim)
+    else:
+        # The reverse receives contiguous head shards from each source rank.
+        permutation = (1, 2, 3, 0, 4, 5)
+        output_shape = (batch, num_frames * local_spatial, size * local_heads, head_dim)
+    return tuple(received[:, index].permute(permutation).reshape(output_shape).contiguous()
+                 for index in range(3))
+
+
+class _SpatialQKVExchange(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, q, k, v, num_frames, group, size, to_head):
+        ctx.num_frames, ctx.group, ctx.size, ctx.to_head = num_frames, group, size, to_head
+        ctx.set_materialize_grads(False)
+        return _exchange_qkv((q, k, v), num_frames, group, size, to_head)
+
+    @staticmethod
+    def backward(ctx, grad_q, grad_k, grad_v):
+        if grad_q is None and grad_k is None and grad_v is None:
+            return (None,) * 7
+        # One inverse exchange carries all gradients, including zero slots
+        # for unused outputs. Recursive apply preserves higher-order autograd.
+        gradients = _SpatialQKVExchange.apply(
+            grad_q, grad_k, grad_v, ctx.num_frames, ctx.group, ctx.size, not ctx.to_head)
+        # SP peers use the same differentiable branches, as required by the
+        # separate collectives too. Preserve None for a disconnected branch:
+        # an explicit zero would let Adam/weight decay update unused weights.
+        return (*[gradient if needed and incoming is not None else None
+                  for gradient, needed, incoming in zip(
+                      gradients, ctx.needs_input_grad[:3], (grad_q, grad_k, grad_v))],
+                None, None, None, None)
+
+
+def sequence_to_head_qkv(q, k, v, num_frames):
+    """Exchange matching Q/K/V together, preserving frame-major token order.
+
+    Each input [B,F*P_local,H,D] becomes [B,F*P,H/SP,D]. Equal-dtype QKV
+    use one all-to-all in forward and one in backward, with unchanged payload
+    bytes. SP1 returns the original objects without packing or communication.
+    SP peers must use the same differentiable Q/K/V branches in backward.
+    Mixed dtypes (e.g. FP32 RMSNorm weights under autocast) keep the separate
+    exchanges to preserve each tensor's precision without implicit casting.
+    """
+    if _SP_SIZE == 1:
+        return q, k, v
+    if q.shape != k.shape or q.shape != v.shape:
+        raise ValueError("Q/K/V must have matching shapes for the spatial exchange")
+    if q.device != k.device or q.device != v.device:
+        raise ValueError("Q/K/V must be on the same device for the spatial exchange")
+    _spatial_size(q, num_frames, 4)
+    if q.shape[2] % _SP_SIZE:
+        raise ValueError("attention heads must be divisible by SP size")
+    if q.dtype != k.dtype or q.dtype != v.dtype:
+        return tuple(sequence_to_head(tensor, num_frames) for tensor in (q, k, v))
+    return _SpatialQKVExchange.apply(q, k, v, num_frames, _SP_GROUP, _SP_SIZE, True)
+
+
 def head_to_sequence(x, num_frames):
     """Inverse of sequence_to_head, with the corresponding inverse backward."""
     if _SP_SIZE == 1:

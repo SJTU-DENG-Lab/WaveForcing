@@ -34,13 +34,17 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--output", required=True, help="run root; each stage gets its own subdirectory")
         sub.add_argument("--world-size", type=int, default=8, help="local torchrun GPU count")
         sub.add_argument("--recipe", choices=RECIPES, default="reference",
-                         help="reference (default) or experimental single-node 14B FSDP8 recipe")
+                         help="training recipe; select parallelism with --sp")
+        sub.add_argument("--sp", "-sp", type=int, dest="sequence_parallel_size",
+                         help="spatial sequence-parallel group size (14B/8 GPUs: 1, 2, 4, 8; "
+                              "default: YAML setting, normally 1). Must divide ranks and heads")
         stages = sub.add_mutually_exclusive_group()
         stages.add_argument("--stage", choices=STAGES)
         stages.add_argument("--stages", help="ordered contiguous list; default: reference s2,s3; 14B s1,s2,s3")
         sub.add_argument("--init-key", help="asset key for the first stage checkpoint; never means resume")
         sub.add_argument("--set", action="append", default=[], dest="overrides",
-                         help="explicit key=value or stage.key=value recipe override")
+                         help="key=value or stage.key=value override; e.g. "
+                              "gradient_accumulation_steps=2 (default auto follows SP)")
         sub.add_argument("--dry-run", action="store_true", help="print the plan without writes or GPU imports")
     resume = commands.add_parser("resume", help="restore a stage's complete model/optimizer/RNG state")
     resume.add_argument("--run", required=True, help="stage directory containing resolved_config.yaml")
@@ -72,7 +76,8 @@ def build_plan(args) -> list:
         config = resolve_config(stage, assets, args.output, args.world_size,
                                 init_key=args.init_key if previous is None else None,
                                 init_checkpoint=previous, overrides=args.overrides,
-                                recipe=getattr(args, "recipe", "reference"))
+                                recipe=getattr(args, "recipe", "reference"),
+                                sequence_parallel_size=getattr(args, "sequence_parallel_size", None))
         configs.append(config)
         previous = str(Path(config.logdir) / f"checkpoint_model_{config.max_steps:06d}" / "model.pt")
     return configs

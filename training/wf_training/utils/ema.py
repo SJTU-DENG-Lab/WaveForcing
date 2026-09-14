@@ -84,4 +84,3 @@ class ShardedEMA:
             current = local_parameters(module)
             for name, value in backup.items():
                 current[name].copy_(value.to(device=current[name].device, dtype=current[name].dtype))
-

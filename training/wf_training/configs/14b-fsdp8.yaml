@@ -1,5 +1,6 @@
 # Experimental 14B student/critic/teacher; target: one node, 8 H200 GPUs.
-# GPU acceptance is pending. The smoke budget checks execution, not quality.
+# Select spatial parallelism with --sp; the completed 8-H200 smoke used SP4.
+# Long-run stability and generation quality remain unvalidated.
 default_stages: [s1, s2, s3]
 init_keys:
   s1: distill_init_14b
@@ -7,7 +8,7 @@ init_keys:
   s3: s3_init_14b
 common:
   # All fields are packaged here so this experimental recipe is inspectable
-  # independently of the reference defaults. No sequence parallelism is enabled.
+  # independently of the reference defaults. FSDP always spans all 8 ranks.
   generator_name: Wan2.1-T2V-14B
   fake_name: Wan2.1-T2V-14B
   real_name: Wan2.1-T2V-14B
@@ -21,6 +22,9 @@ common:
   profile_memory: true
   mixed_precision: true
   batch_size: 1
+  sequence_parallel_size: 1
+  # Auto uses the SP degree to retain effective batch 8; an integer overrides it.
+  gradient_accumulation_steps: auto
   lr: 1.5e-6
   lr_critic: 4.0e-7
   beta1: 0.0

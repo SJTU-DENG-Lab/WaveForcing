@@ -20,7 +20,7 @@ from wf_training.utils.sequence_parallel import (
     get_sp_world_size,
     split_spatial,
     gather_spatial,
-    sequence_to_head,
+    sequence_to_head_qkv,
     head_to_sequence,
 )
 
@@ -174,7 +174,8 @@ class CausalWanSelfAttention(nn.Module):
         kv_cache=None,
         current_start=0,
         cache_start=None,
-        updating_cache=False
+        updating_cache=False,
+        teacher_forcing: bool = False,
     ):
         r"""
         Args:
@@ -183,6 +184,7 @@ class CausalWanSelfAttention(nn.Module):
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
             block_mask (BlockMask)
+            teacher_forcing (bool): Clean/noisy halves share the same RoPE grid.
         """
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
         if cache_start is None:
@@ -198,11 +200,8 @@ class CausalWanSelfAttention(nn.Module):
         q, k, v = qkv_fn(x)
         # Clean/noisy teacher forcing uses two consecutive copies of the frame
         # grid. Within each frame, exchange spatial tokens for head shards.
-        is_tf = kv_cache is None and s * get_sp_world_size() == seq_lens[0].item() * 2
-        num_frames = int(grid_sizes[0, 0]) * (2 if is_tf else 1)
-        q = sequence_to_head(q, num_frames)
-        k = sequence_to_head(k, num_frames)
-        v = sequence_to_head(v, num_frames)
+        num_frames = int(grid_sizes[0, 0]) * (2 if teacher_forcing else 1)
+        q, k, v = sequence_to_head_qkv(q, k, v, num_frames)
         if get_sp_world_size() > 1 and kv_cache is not None:
             expected_heads = self.num_heads // get_sp_world_size()
             if any(kv_cache[key].shape[2:] != (expected_heads, self.head_dim)
@@ -211,7 +210,7 @@ class CausalWanSelfAttention(nn.Module):
 
         if kv_cache is None:
             # RoPE repeats for the clean and noisy halves of teacher forcing.
-            if is_tf:
+            if teacher_forcing:
                 q_chunk = torch.chunk(q, 2, dim=1)
                 k_chunk = torch.chunk(k, 2, dim=1)
                 roped_query = []
@@ -504,7 +503,8 @@ class CausalWanAttentionBlock(nn.Module):
         kv_cache=None,
         crossattn_cache=None,
         current_start=0,
-        cache_start=None
+        cache_start=None,
+        teacher_forcing: bool = False,
     ):
         r"""
         Args:
@@ -524,7 +524,8 @@ class CausalWanAttentionBlock(nn.Module):
         y = self.self_attn(
             (self.norm1(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]).flatten(1, 2),
             seq_lens, grid_sizes,
-            freqs, block_mask, kv_cache, current_start, cache_start, updating_cache=updating_cache)
+            freqs, block_mask, kv_cache, current_start, cache_start,
+            updating_cache=updating_cache, teacher_forcing=teacher_forcing)
 
         # with amp.autocast(dtype=torch.float32):
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(1, 2)
@@ -1021,6 +1022,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_lens=context_lens,
             block_mask=self.block_mask,
             updating_cache=updating_cache,
+            teacher_forcing=False,
         )
 
         def create_custom_forward(module):
@@ -1095,6 +1097,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         """
         if self.model_type == 'i2v':
             assert clip_fea is not None and y is not None
+        teacher_forcing = clean_x is not None
         # params
         device = self.patch_embedding.weight.device
         if self.freqs.device != device:
@@ -1102,7 +1105,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # Construct blockwise causal attn mask
         if self.block_mask is None:
-            if clean_x is not None:
+            if teacher_forcing:
                 if self.independent_first_frame:
                     raise NotImplementedError()
                 else:
@@ -1165,7 +1168,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
             context = torch.concat([context_clip, context], dim=1)
 
-        if clean_x is not None:
+        if teacher_forcing:
             clean_x = [self.patch_embedding(u.unsqueeze(0)) for u in clean_x]
             clean_x = [u.flatten(2).transpose(1, 2) for u in clean_x]
 
@@ -1186,7 +1189,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         if get_sp_world_size() > 1:
             num_frames = _spatial_num_frames(
-                grid_sizes, x.shape[1], copies=2 if clean_x is not None else 1)
+                grid_sizes, x.shape[1], copies=2 if teacher_forcing else 1)
             x = split_spatial(x, num_frames)
 
         # arguments
@@ -1197,7 +1200,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             freqs=self.freqs,
             context=context,
             context_lens=context_lens,
-            block_mask=self.block_mask)
+            block_mask=self.block_mask,
+            teacher_forcing=teacher_forcing)
 
         def create_custom_forward(module):
             def custom_forward(*inputs, **kwargs):
@@ -1214,7 +1218,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             else:
                 x = block(x, **kwargs)
 
-        if clean_x is not None:
+        if teacher_forcing:
             x = x[:, x.shape[1] // 2:]
 
         # head

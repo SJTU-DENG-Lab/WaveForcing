@@ -1,7 +1,9 @@
 # Experimental 14B training on 8 H200 GPUs
 
-The `14b-fsdp8` and `14b-fsdp8-sp4` recipe families target one node with
-eight H200 GPUs, with full and smoke budgets for each topology. Generator, critic, and frozen real score are all Wan2.1-T2V-14B.
+The `14b-fsdp8` and `14b-fsdp8-smoke` recipes target one node with
+eight H200 GPUs. Select spatial sequence parallelism independently with
+`--sp 1`, `--sp 2`, `--sp 4`, or `--sp 8` (`-sp` is an alias).
+Generator, critic, and frozen real score are all Wan2.1-T2V-14B.
 The **FSDP8/SP4 main GPU smoke passed on 2026-09-14**: all S1/S2/S3
 budgets of 6/2/6 iterations completed, including BF16 training, stage
 handoffs, S2 paired DMD/LPIPS, EMA, and three complete final checkpoints.
@@ -32,17 +34,35 @@ for its OOM record.
 The default `--recipe reference` retains the existing 1.3B student/critic,
 14B teacher, and S2 → S3 plan. The 14B recipes select S1 → S2 → S3 by default
 and require exactly eight ranks. All use full FSDP, rank-0 initialization,
-sharded EMA, BF16 mixed precision, and gradient checkpointing. The SP1
-recipes process one complete sample per rank (effective batch 8).
+sharded EMA, BF16 mixed precision, and gradient checkpointing. Without
+`--sp`, the packaged YAML defaults to `sequence_parallel_size: 1`.
+The option takes one degree per launch; it does not launch a sweep.
 
-The separate `14b-fsdp8-sp4` and `14b-fsdp8-sp4-smoke` recipes add spatial
-sequence parallelism to the same eight-rank FSDP group. SP groups are
-`[0,1,2,3]` and `[4,5,6,7]`, each processing one sample. Four microbatches
-per optimizer update preserve effective batch 8. Every microbatch performs
+FSDP spans all eight ranks for every SP degree. Each SP group processes
+one sample. `gradient_accumulation_steps: auto` resolves to the SP degree,
+preserving effective batch 8:
+
+| Option | Independent samples per microbatch | Default accumulation | Effective batch |
+|---|---:|---:|---:|
+| `--sp 1` | 8 | 1 | 8 |
+| `--sp 2` | 4 | 2 | 8 |
+| `--sp 4` | 2 | 4 | 8 |
+| `--sp 8` | 1 | 8 | 8 |
+
+Accumulation is independently configurable: `--sp 4 --set gradient_accumulation_steps=2`
+produces effective batch 4. The resolved configuration always records integer
+SP/accumulation, data-parallel size, and the resulting effective batch.
+`--set sequence_parallel_size=4` also works; a conflicting `--sp` and
+applicable `--set sequence_parallel_size=...` is rejected. SP must divide
+WORLD size, spatial tokens per frame, and every model's attention heads.
+14B has 40 heads and supports all four choices; the `reference` recipe's
+1.3B student/critic have 12 heads, so SP8 is rejected before model loading.
+
+For example, SP4 groups are `[0,1,2,3]` and `[4,5,6,7]`. Every microbatch performs
 a normal FSDP backward; `no_sync()` is not used, so accumulated gradients
 remain sharded. Adam, clipping, and EMA run once per optimizer update.
 
-SP divides each frame's 1560 spatial tokens into four sets of 390. Before
+With SP4, each frame's 1560 spatial tokens are split into four sets of 390. Before
 self-attention, differentiable all-to-all exchanges these for the complete
 frame sequence and 10 of the 40 heads per rank. RoPE, temporal masks, sink
 positions, and cache indices retain their global units. Q/K normalization
@@ -53,6 +73,17 @@ self-KV is separately stored by local heads, reducing the 27-frame cache
 from approximately 32.1 to 8.0 GiB per GPU. Cross-attention text KV stays
 replicated. The total GPU peak is not divided by four.
 
+Matching-dtype Q/K/V now share one packed all-to-all, after Q/K RMSNorm.
+Together with the output head-to-sequence exchange, this reduces each
+self-attention forward from four all-to-alls to two; network payload bytes
+are unchanged. Backward also packs the three gradients into one inverse
+exchange. Send buffers are filled directly without an intermediate QKV
+concatenation and released before unpacking the outputs. Mixed-dtype Q/K/V
+use separate exchanges to preserve precision (possible with FP32 norm weights
+under ordinary autocast); the FSDP BF16 path uses the fused exchange.
+The historical GPU timings and memory peaks above predate this optimization;
+its H200 timing and allocation peaks have not been remeasured.
+
 Prompts, teacher pairs, timesteps, and noise agree within each SP group.
 Choices affecting model/collective order (RF/CRF/SF path, rollout length,
 exit schedule, and S2 prefix length) remain synchronized across all eight
@@ -60,7 +91,7 @@ ranks. Resume checkpoints record SP size, accumulation, and data-replica
 identity; a checkpoint from a different topology is rejected. Raw model
 weights retain the existing layout for stage handoff.
 
-Use `--recipe 14b-fsdp8-sp4-smoke` with the same asset YAML to select the new
+Use `--recipe 14b-fsdp8-smoke --sp 4` with the same asset YAML to select the
 smoke; its S1/S2/S3 budgets remain 6/2/6 training iterations. The completed
 main smoke and the separate restart check are recorded in the
 SP4 experiment (`2026-09-14-wf-14b-fsdp8-sp4-smoke/REPORT.md` in external experiment storage).
@@ -74,13 +105,11 @@ that restores the raw generator afterward.
 
 ## Packaged recipes
 
-All four recipe YAML files contain their complete common settings, stage
-settings, default stage order, and initial-asset keys:
+The full and smoke YAMLs contain the algorithm settings, default stage order,
+initial-asset keys, and overridable parallelism defaults:
 
-- [14b-fsdp8.yaml](wf_training/configs/14b-fsdp8.yaml): FSDP8/SP1, full experimental budgets.
-- [14b-fsdp8-smoke.yaml](wf_training/configs/14b-fsdp8-smoke.yaml): FSDP8/SP1, smoke budgets.
-- [14b-fsdp8-sp4.yaml](wf_training/configs/14b-fsdp8-sp4.yaml): overlapping FSDP8/SP4, full experimental budgets.
-- [14b-fsdp8-sp4-smoke.yaml](wf_training/configs/14b-fsdp8-sp4-smoke.yaml): overlapping FSDP8/SP4, smoke budgets.
+- [14b-fsdp8.yaml](wf_training/configs/14b-fsdp8.yaml): full experimental budgets; choose SP with `--sp`.
+- [14b-fsdp8-smoke.yaml](wf_training/configs/14b-fsdp8-smoke.yaml): smoke budgets; choose SP with `--sp`.
 - [assets.14b.example.yaml](wf_training/configs/assets.14b.example.yaml): local asset template.
 
 | Stage | Initialization | Objective | Full iterations | Smoke iterations |
@@ -156,21 +185,21 @@ checks the referenced local files and native model metadata.
 
 ```bash
 .venv/bin/python -m wf_training show-config \
-  --recipe 14b-fsdp8-sp4-smoke \
+  --recipe 14b-fsdp8-smoke --sp 4 \
   --assets /path/to/run-assets.14b.yaml --output /path/to/runs/14b-smoke
 
 .venv/bin/python -m wf_training preflight \
-  --recipe 14b-fsdp8-sp4-smoke \
+  --recipe 14b-fsdp8-smoke --sp 4 \
   --assets /path/to/run-assets.14b.yaml --output /path/to/runs/14b-smoke
 
 .venv/bin/python -m wf_training run \
-  --recipe 14b-fsdp8-sp4-smoke \
+  --recipe 14b-fsdp8-smoke --sp 4 \
   --assets /path/to/run-assets.14b.yaml --output /path/to/runs/14b-smoke \
   --world-size 8 --dry-run
 ```
 
 After the assets and execution environment are ready, remove `--dry-run`
-to run the smoke plan. Use a new output root and `--recipe 14b-fsdp8-sp4`
+to run the smoke plan. Use a new output root and `--recipe 14b-fsdp8 --sp 4`
 for the full experimental budgets when moving beyond the smoke. Explicit
 `--stage` / `--stages` and stage-scoped `--set` remain available. All 14B
 plans retain the native four-step schedule, eight-rank topology, full
@@ -180,7 +209,7 @@ Launch the SP4 smoke with the same assets and a separate output directory:
 
 ```bash
 .venv/bin/python -m wf_training run \
-  --recipe 14b-fsdp8-sp4-smoke \
+  --recipe 14b-fsdp8-smoke --sp 4 \
   --assets /path/to/run-assets.14b.yaml --output /path/to/runs/14b-sp4-smoke \
   --world-size 8
 ```
@@ -205,7 +234,7 @@ full exports, with 425.838 GiB written per final checkpoint.
 
 ## Checkpoints and resume acceptance
 
-All four recipes save a complete final checkpoint. They do not bypass saving
+Both 14B recipes save a complete final checkpoint. They do not bypass saving
 or disable recovery to make the smoke run fit. Default periodic save
 intervals remain 500 iterations, so each short smoke stage normally saves
 only its final state. Keep `model.pt`, `resume_complete.json`, and all eight
@@ -234,7 +263,7 @@ written and before the final step, then resume from it:
 
 ```bash
 .venv/bin/python -m wf_training run \
-  --recipe 14b-fsdp8-sp4-smoke --stage s1 \
+  --recipe 14b-fsdp8-smoke --sp 4 --stage s1 \
   --assets /path/to/run-assets.14b.yaml --output /path/to/runs/14b-resume \
   --set s1.log_iters=5 --set s1.resume_save_iters=5
 
@@ -310,10 +339,26 @@ bitwise equivalence.
 See the SP4 validation record (`2026-09-14-wf-14b-fsdp8-sp4-smoke/REPORT.md` in external experiment storage)
 for exact provenance, completed stage records, and the successful restart.
 
-After GPU execution completed, only acceptance comments in the two SP4 YAMLs
-were updated. Python files were unchanged and both parsed configurations
-remained identical. The delivered package hash is
+Immediately after that GPU execution, only acceptance comments in the two
+SP4 YAMLs were updated. Python files were unchanged and both parsed configurations
+remained identical. That earlier delivery package hash was
 `510aeeec33b19be299adc52d49fb6c4b1cac05207b122ef74b4e0e212321d166`,
 recorded separately in delivery provenance (`2026-09-14-wf-14b-fsdp8-sp4-smoke/source/provenance02.json` in external experiment storage).
 The actual executed hash remained `3e1ae02b…c01fb`; the delivery hash is
 not presented as a separately GPU-tested snapshot.
+
+The later CLI refactor separates `--sp` from the recipe and removes the
+duplicate SP4 recipe names and YAMLs. After removing those names, all 25
+configuration/CLI regression tests passed, covering SP1/2/4/8 and rejection
+of removed recipe names. This does not extend the historical 14B GPU smoke
+result beyond SP4.
+Saved resolved configurations using the supported recipe names retain their
+recorded values during resume; changing SP or accumulation requires a new run
+rather than resuming optimizer/RNG state from a different topology.
+
+After the CLI and explicit teacher-forcing flag refactors and packed QKV
+exchange, all 104 CPU tests and 12 four-rank GLOO model comparisons passed.
+These include SP2/4/8 exchange ordering, exact reference outputs and gradients,
+unused-gradient semantics, second derivatives, and checkpoint recomputation.
+This later implementation has not repeated the 14B H200 smoke, timing, or
+memory measurements above.

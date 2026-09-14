@@ -12,7 +12,7 @@ from wf_training.utils.sequence_parallel import (
     get_sp_world_size,
     split_spatial,
     gather_spatial,
-    sequence_to_head,
+    sequence_to_head_qkv,
     head_to_sequence,
 )
 
@@ -168,9 +168,7 @@ class WanSelfAttention(nn.Module):
         q, k, v = qkv_fn(x)
         # RMSNorm above spans every channel, before heads are distributed.
         num_frames = int(grid_sizes[0, 0])
-        q = sequence_to_head(q, num_frames)
-        k = sequence_to_head(k, num_frames)
-        v = sequence_to_head(v, num_frames)
+        q, k, v = sequence_to_head_qkv(q, k, v, num_frames)
 
         x = flash_attention(
             q=rope_apply(q, grid_sizes, freqs),

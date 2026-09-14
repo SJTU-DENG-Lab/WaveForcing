@@ -64,7 +64,8 @@ def _reference_sp1():
     with ExitStack() as stack:
         for module in (wan, causal):
             stack.enter_context(patch.object(module, 'get_sp_world_size', return_value=1))
-            stack.enter_context(patch.object(module, 'sequence_to_head', side_effect=lambda x, f: x))
+            stack.enter_context(patch.object(module, 'sequence_to_head_qkv',
+                                             side_effect=lambda q, k, v, f: (q, k, v)))
             stack.enter_context(patch.object(module, 'head_to_sequence', side_effect=lambda x, f: x))
         yield
 

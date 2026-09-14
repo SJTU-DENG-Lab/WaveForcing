@@ -12,6 +12,9 @@ ema_mode: full
 profile_memory: false
 mixed_precision: true
 batch_size: 1
+sequence_parallel_size: 1
+# Preserve effective batch when SP changes; a positive integer overrides this.
+gradient_accumulation_steps: auto
 lr: 1.5e-6
 lr_critic: 4.0e-7
 beta1: 0.0

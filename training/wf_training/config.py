@@ -13,8 +13,7 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf
 
 STAGES = ("s1", "s2", "s3")
-RECIPES = ("reference", "14b-fsdp8", "14b-fsdp8-smoke",
-           "14b-fsdp8-sp4", "14b-fsdp8-sp4-smoke")
+RECIPES = ("reference", "14b-fsdp8", "14b-fsdp8-smoke")
 _PATH_FIELDS = {
     "model_root", "data_path", "generator_ckpt", "paired_manifest",
     "paired_validation_manifest", "logdir", "wandb_save_dir", "resume_from",
@@ -84,7 +83,8 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
                    world_size: int = 8,
                    init_key: str | None = None, init_checkpoint: str | None = None,
                    overrides: list[str] | None = None,
-                   recipe: str = "reference") -> DictConfig:
+                   recipe: str = "reference",
+                   sequence_parallel_size: int | None = None) -> DictConfig:
     if stage not in STAGES:
         raise ConfigError(f"unsupported stage: {stage}")
     if world_size < 1:
@@ -106,6 +106,16 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
         if "=" not in override or name not in config or name in _PATH_FIELDS:
             raise ConfigError(f"unknown or non-overridable configuration field: {name}")
     config = OmegaConf.merge(config, OmegaConf.from_dotlist(selected_overrides))
+    if sequence_parallel_size is not None:
+        if (any(item.partition("=")[0] == "sequence_parallel_size"
+                for item in selected_overrides)
+                and config.sequence_parallel_size != sequence_parallel_size):
+            raise ConfigError("--sp conflicts with --set sequence_parallel_size for " + stage)
+        config.sequence_parallel_size = sequence_parallel_size
+    # An automatic default preserves the recipe's effective batch when SP
+    # reduces its independent data replicas. Explicit accumulation is separate.
+    if config.gradient_accumulation_steps == "auto":
+        config.gradient_accumulation_steps = config.sequence_parallel_size
     required = ["model_root", "prompts"]
     if stage == "s2":
         required += ["paired_train", "paired_val"]
@@ -119,16 +129,16 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
     config.stage = stage
     config.denoising_step_list = parse_denoising_step_list(config.denoising_step_list)
     config.recipe = recipe
-    recipe_prefix = "wf_14b_fsdp8_sp4" if "-sp4" in recipe else "wf_14b_fsdp8"
-    config.recipe_id = (f"wf_{stage}" if recipe == "reference" else
-                        f"{recipe_prefix}_experimental_"
-                        + ("smoke_" if recipe.endswith("-smoke") else "") + stage)
     config.world_size = world_size
     sp_size, accumulation = _parallel_sizes(config)
     config.sequence_parallel_size = sp_size
     config.gradient_accumulation_steps = accumulation
     config.data_parallel_size = world_size // sp_size
     config.effective_batch_size = config.data_parallel_size * config.batch_size * accumulation
+    sp_suffix = f"_sp{sp_size}" if sp_size > 1 else ""
+    config.recipe_id = (f"wf{sp_suffix}_{stage}" if recipe == "reference" else
+                        f"wf_14b_fsdp8{sp_suffix}_experimental_"
+                        + ("smoke_" if recipe.endswith("-smoke") else "") + stage)
     config.model_root = assets["model_root"]
     config.data_path = assets["prompts"]
     config.generator_ckpt = init_checkpoint or assets[init_key]
@@ -166,12 +176,6 @@ def validate_config(config: DictConfig) -> None:
     if int(config.world_size) != config.world_size or config.world_size < 1:
         raise ConfigError("world_size must be a positive integer")
     sp_size, accumulation = _parallel_sizes(config)
-    expected_sp = 4 if "-sp4" in recipe else 1
-    if sp_size != expected_sp or accumulation != expected_sp:
-        raise ConfigError(
-            f"{recipe} requires sequence_parallel_size={expected_sp} and "
-            f"gradient_accumulation_steps={expected_sp}"
-        )
     dp_size = config.world_size // sp_size
     if getattr(config, "data_parallel_size", dp_size) != dp_size:
         raise ConfigError("data_parallel_size must equal world_size / sequence_parallel_size")
@@ -223,6 +227,23 @@ def validate_config(config: DictConfig) -> None:
         raise ConfigError("mix_final_probs must be three nonnegative probabilities summing to one")
     if config.num_frame_per_block != 3 or list(config.image_or_video_shape) != [1, 21, 16, 60, 104]:
         raise ConfigError("reference recipes require 3-frame blocks and [1,21,16,60,104] input shape")
+    if sp_size > 1:
+        # Both supported native Wan architectures use spatial 2x2 patches.
+        height, width = config.image_or_video_shape[-2:]
+        spatial_tokens = (height // 2) * (width // 2)
+        if spatial_tokens % sp_size:
+            raise ConfigError("spatial tokens per frame must be divisible by sequence_parallel_size")
+        model_heads = {"Wan2.1-T2V-1.3B": 12, "Wan2.1-T2V-14B": 40}
+        for field in ("generator_name", "fake_name", "real_name"):
+            name = config[field]
+            heads = model_heads.get(name)
+            if heads is None:
+                raise ConfigError(f"cannot validate SP attention heads for {field}={name}")
+            if heads % sp_size:
+                raise ConfigError(
+                    f"{field}={name} has {heads} attention heads, which must be "
+                    "divisible by sequence_parallel_size"
+                )
     if config.no_save:
         raise ConfigError("the reproducible launcher requires checkpoint saving")
     for name in ("max_steps", "log_iters", "resume_save_iters", "dfake_gen_update_ratio"):

@@ -56,4 +56,3 @@ def memory_scope(config, label, *, step=None, device=None):
         failed = False
     finally:
         record("end", time.monotonic() - started, failed)
-
