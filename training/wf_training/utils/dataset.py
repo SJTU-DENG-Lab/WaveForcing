@@ -26,7 +26,51 @@ class TextDataset(Dataset):
         return batch
 
 
-def cycle(dl):
-    while True:
-        for data in dl:
-            yield data
+class CyclingLoader:
+    """Yield batches forever, calling ``sampler.set_epoch`` at each pass.
+
+    ``DistributedSampler(shuffle=True)`` is seeded by ``seed + epoch``. Leaving
+    epoch at 0 makes every pass identical, so Stage 2's generator/critic pair
+    of draws permanently splits a shard whose length divides ``2 * accum``.
+    """
+
+    def __init__(self, dataloader, sampler=None):
+        self.dataloader = dataloader
+        self.sampler = sampler
+        self.epoch = 0
+        self._iterator = None
+        if self.sampler is not None:
+            self.sampler.set_epoch(self.epoch)
+
+    def _start_epoch(self, epoch):
+        self.epoch = int(epoch)
+        if self.sampler is not None:
+            self.sampler.set_epoch(self.epoch)
+        self._iterator = iter(self.dataloader)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._iterator is None:
+            self._start_epoch(self.epoch)
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            self._start_epoch(self.epoch + 1)
+            return next(self._iterator)
+
+    def seek(self, batches_seen):
+        epoch_len = len(self.dataloader)
+        if epoch_len < 1:
+            raise ValueError("dataloader must contain at least one batch")
+        batches_seen = int(batches_seen)
+        if batches_seen < 0:
+            raise ValueError("batches_seen must be nonnegative")
+        self._start_epoch(batches_seen // epoch_len)
+        for _ in range(batches_seen % epoch_len):
+            next(self._iterator)
+
+
+def cycle(dl, sampler=None):
+    return CyclingLoader(dl, sampler)

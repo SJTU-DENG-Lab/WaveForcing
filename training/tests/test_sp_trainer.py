@@ -426,6 +426,7 @@ class SPTrainerTest(unittest.TestCase):
                 for call in sampler.call_args_list:
                     self.assertEqual(call.kwargs["num_replicas"], 2)
                     self.assertEqual(call.kwargs["rank"], 1)
+                    self.assertEqual(call.kwargs["seed"], 123)
 
 
 if __name__ == "__main__":

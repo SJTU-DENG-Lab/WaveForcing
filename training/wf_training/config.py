@@ -13,7 +13,10 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf
 
 STAGES = ("s1", "s2", "s3")
-RECIPES = ("reference", "14b-fsdp8", "14b-fsdp8-smoke", "14b-hsdp", "14b-hsdp-smoke")
+RECIPES = (
+    "reference", "14b-fsdp8", "14b-fsdp8-smoke",
+    "14b-hsdp", "14b-hsdp-smoke", "14b-hsdp-fast",
+)
 _PATH_FIELDS = {
     "model_root", "data_path", "generator_ckpt", "paired_manifest",
     "paired_validation_manifest", "logdir", "wandb_save_dir", "resume_from",
@@ -49,6 +52,14 @@ def load_assets(path: str | Path) -> dict[str, str]:
 def _resource(name: str) -> DictConfig:
     content = resources.files("wf_training").joinpath("configs", name + ".yaml").read_text()
     return OmegaConf.create(content)
+
+
+def _experimental_recipe_tag(recipe: str) -> str:
+    if recipe.endswith("-smoke"):
+        return "smoke_"
+    if recipe.endswith("-fast"):
+        return "fast_"
+    return ""
 
 
 def recipe_defaults(recipe: str = "reference") -> DictConfig:
@@ -150,7 +161,7 @@ def resolve_config(stage: str, assets: dict[str, str], output: str | Path,
                    if recipe.startswith("14b-hsdp") else "fsdp8")
     config.recipe_id = (f"wf{sp_suffix}_{stage}" if recipe == "reference" else
                         f"wf_14b_{parallel_id}{sp_suffix}_experimental_"
-                        + ("smoke_" if recipe.endswith("-smoke") else "") + stage)
+                        + _experimental_recipe_tag(recipe) + stage)
     config.model_root = assets["model_root"]
     config.data_path = assets["prompts"]
     config.generator_ckpt = init_checkpoint or assets[init_key]

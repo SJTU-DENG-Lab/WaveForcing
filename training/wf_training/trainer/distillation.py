@@ -3,8 +3,7 @@ import json
 import logging
 import random
 
-from wf_training.utils.dataset import cycle
-from wf_training.utils.dataset import TextDataset
+from wf_training.utils.dataset import CyclingLoader, TextDataset
 from wf_training.utils.distributed import EMA_FSDP, fsdp_wrap, fsdp_state_dict, launch_distributed_job
 from wf_training.utils.ema import ShardedEMA
 from wf_training.utils.checkpoint import load_model_checkpoint, generator_state
@@ -193,7 +192,8 @@ class Trainer:
         dataset = TextDataset(config.data_path)
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset, num_replicas=get_data_parallel_world_size(),
-            rank=get_data_parallel_rank(), shuffle=True, drop_last=True)
+            rank=get_data_parallel_rank(), shuffle=True, drop_last=True,
+            seed=int(config.seed))
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.batch_size,
@@ -203,7 +203,7 @@ class Trainer:
         if dist.get_rank() == 0:
             print("DATASET SIZE %d" % len(dataset))
         self._dataloader_len = len(dataloader)
-        self.dataloader = cycle(dataloader)
+        self.dataloader = CyclingLoader(dataloader, sampler)
 
         self.paired_dataloader = None
         self._paired_dataloader_len = 0
@@ -213,7 +213,8 @@ class Trainer:
             paired_dataset = PairedDMDLatentDataset(config.paired_manifest)
             paired_sampler = torch.utils.data.distributed.DistributedSampler(
                 paired_dataset, num_replicas=get_data_parallel_world_size(),
-                rank=get_data_parallel_rank(), shuffle=True, drop_last=True)
+                rank=get_data_parallel_rank(), shuffle=True, drop_last=True,
+                seed=int(config.seed))
             paired_dataloader = torch.utils.data.DataLoader(
                 paired_dataset,
                 batch_size=config.batch_size,
@@ -222,7 +223,7 @@ class Trainer:
                 pin_memory=True,
             )
             self._paired_dataloader_len = len(paired_dataloader)
-            self.paired_dataloader = cycle(paired_dataloader)
+            self.paired_dataloader = CyclingLoader(paired_dataloader, paired_sampler)
             if dist.get_rank() == 0:
                 print("PAIRED DATASET SIZE %d" % len(paired_dataset))
 
@@ -343,6 +344,24 @@ class Trainer:
         self.paired_batches_seen += 1
         return batch
 
+    @staticmethod
+    def _cursor_epoch(batches_seen, epoch_len):
+        if epoch_len < 1:
+            raise ValueError("dataloader length must be positive")
+        batches_seen = int(batches_seen)
+        if batches_seen < 0:
+            raise ValueError("batches_seen must be nonnegative")
+        return batches_seen // epoch_len, batches_seen % epoch_len
+
+    def _replay_loader(self, loader, batches_seen, epoch_len):
+        epoch, offset = self._cursor_epoch(batches_seen, epoch_len)
+        if hasattr(loader, "seek"):
+            loader.seek(batches_seen)
+            return epoch, offset
+        for _ in range(offset):
+            next(loader)
+        return epoch, offset
+
     def _save_resume_state(self, checkpoint_dir):
         """Save a same-world-size, per-rank exact training snapshot."""
         rank = dist.get_rank()
@@ -355,6 +374,14 @@ class Trainer:
             **self._training_topology(rank),
             "data_batches_seen": self.data_batches_seen,
             "paired_batches_seen": self.paired_batches_seen,
+            "data_epoch": (self.data_batches_seen // self._dataloader_len
+                           if self._dataloader_len else 0),
+            "data_epoch_offset": (self.data_batches_seen % self._dataloader_len
+                                  if self._dataloader_len else 0),
+            "paired_epoch": (self.paired_batches_seen // self._paired_dataloader_len
+                             if self._paired_dataloader_len else 0),
+            "paired_epoch_offset": (self.paired_batches_seen % self._paired_dataloader_len
+                                    if self._paired_dataloader_len else 0),
             "optimizer_state_rank": owner,
             "generator_optimizer": self.generator_optimizer.state_dict() if owner == rank else None,
             "critic_optimizer": (
@@ -514,16 +541,31 @@ class Trainer:
             raise ValueError("EMA storage mode differs from the saved rank state")
         self._resume_ema_shard = tensor_state.get("generator_ema_shard")
 
-        # The text dataset and DistributedSampler are deterministic and repeat
-        # the same order each cycle. Advance to the exact saved cursor before
-        # restoring RNG so iterator construction cannot perturb model RNG.
-        skip_batches = self.data_batches_seen % self._dataloader_len
-        for _ in range(skip_batches):
-            next(self.dataloader)
+        # Replay the exact epoch and in-epoch offset. set_epoch makes each
+        # pass a new shuffle, so modulo-only skip on epoch 0 would restore the
+        # wrong stream after the first wrap. Cursor replay runs before RNG
+        # restore so iterator construction cannot perturb model RNG.
+        data_epoch, data_offset = self._replay_loader(
+            self.dataloader, self.data_batches_seen, self._dataloader_len)
+        if "data_epoch" in state and int(state["data_epoch"]) != data_epoch:
+            raise ValueError(
+                f"resume data_epoch mismatch: saved={state['data_epoch']} computed={data_epoch}")
+        if "data_epoch_offset" in state and int(state["data_epoch_offset"]) != data_offset:
+            raise ValueError(
+                f"resume data_epoch_offset mismatch: saved={state['data_epoch_offset']} "
+                f"computed={data_offset}")
         if self.paired_dataloader is not None:
-            paired_skip = self.paired_batches_seen % self._paired_dataloader_len
-            for _ in range(paired_skip):
-                next(self.paired_dataloader)
+            paired_epoch, paired_offset = self._replay_loader(
+                self.paired_dataloader, self.paired_batches_seen,
+                self._paired_dataloader_len)
+            if "paired_epoch" in state and int(state["paired_epoch"]) != paired_epoch:
+                raise ValueError(
+                    f"resume paired_epoch mismatch: saved={state['paired_epoch']} "
+                    f"computed={paired_epoch}")
+            if "paired_epoch_offset" in state and int(state["paired_epoch_offset"]) != paired_offset:
+                raise ValueError(
+                    f"resume paired_epoch_offset mismatch: saved={state['paired_epoch_offset']} "
+                    f"computed={paired_offset}")
 
         # A completed Stage 2 step has already initialized LPIPS. Recreate it
         # before restoring RNG: VGG/LPIPS construction consumes CPU randomness,

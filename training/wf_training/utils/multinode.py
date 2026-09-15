@@ -130,7 +130,7 @@ def _check_topology(configs, world, local):
     for config in configs:
         if (config.world_size != world or getattr(config, 'gpus_per_node', config.world_size) != local):
             raise ConfigError('saved/resolved configuration differs from torchrun topology')
-        if getattr(config, 'recipe', '') not in ('14b-hsdp', '14b-hsdp-smoke'):
+        if not str(getattr(config, 'recipe', '')).startswith('14b-hsdp'):
             raise ConfigError('distributed commands require a 14b-hsdp recipe')
 
 

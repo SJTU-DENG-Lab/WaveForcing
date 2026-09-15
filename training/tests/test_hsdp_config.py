@@ -27,8 +27,10 @@ class HSDPConfigTest(unittest.TestCase):
                               world_size=world_size, **kwargs)
 
     def test_stage_budgets_and_default_batch_scale_with_world_not_step_division(self):
-        for recipe, budgets in (("14b-hsdp", (3000, 1000, 2000)),
-                                ("14b-hsdp-smoke", (6, 2, 6))):
+        for recipe, budgets, accum in (
+                ("14b-hsdp", (3000, 1000, 2000), 4),
+                ("14b-hsdp-smoke", (6, 2, 6), 4),
+                ("14b-hsdp-fast", (1500, 500, 1000), 1)):
             for world in (8, 16, 64):
                 for stage, budget in zip(("s1", "s2", "s3"), budgets):
                     with self.subTest(recipe=recipe, world=world, stage=stage):
@@ -40,10 +42,16 @@ class HSDPConfigTest(unittest.TestCase):
                         self.assertEqual(config.fsdp_replica_size, world // 8)
                         self.assertEqual(config.sharding_strategy, "hybrid_full")
                         self.assertEqual(config.sequence_parallel_size, 4)
-                        self.assertEqual(config.gradient_accumulation_steps, 4)
+                        self.assertEqual(config.gradient_accumulation_steps, accum)
                         self.assertEqual(config.data_parallel_size, world // 4)
-                        self.assertEqual(config.effective_batch_size, world)
+                        self.assertEqual(config.effective_batch_size, (world // 4) * accum)
                         self.assertIn(f"hsdp8x{world // 8}_sp4", config.recipe_id)
+                        tag = {"14b-hsdp-smoke": "smoke_", "14b-hsdp-fast": "fast_"}.get(recipe, "")
+                        if tag:
+                            self.assertIn(tag, config.recipe_id)
+                        else:
+                            self.assertNotIn("smoke_", config.recipe_id)
+                            self.assertNotIn("fast_", config.recipe_id)
 
     def test_64_gpu_sp_accumulation_matrix(self):
         for sp, accumulation, expected in ((4, "auto", 64), (4, 1, 16),

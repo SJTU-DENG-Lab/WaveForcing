@@ -122,6 +122,11 @@ initial-asset keys, and overridable parallelism defaults:
   HSDP budgets; node count comes from `torchrun`.
 - [14b-hsdp-smoke.yaml](wf_training/configs/14b-hsdp-smoke.yaml):
   multi-node smoke budgets; validated on 2×8 H200 with SP4.
+- [14b-hsdp-fast.yaml](wf_training/configs/14b-hsdp-fast.yaml):
+  64-card wall-clock variant; `accum=1`, budgets 1500/500/1000. Node count
+  comes from `torchrun`. Official resume cannot continue past these
+  `max_steps`; raise `max_steps` in that run's `resolved_config.yaml` to
+  extend. Do not switch to `14b-hsdp` to finish the run (`accum` 1 vs auto/4).
 - [assets.14b.example.yaml](wf_training/configs/assets.14b.example.yaml): local asset template.
 
 | Stage | Initialization | Objective | Full iterations | Smoke iterations |
