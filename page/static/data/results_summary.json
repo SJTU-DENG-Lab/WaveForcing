@@ -1,125 +1,555 @@
 {
-  "source": "results/results_table.json",
-  "report": "KV exchange full-matrix report · 2026-08-09",
-  "records": 178,
-  "ok": 164,
-  "timeouts": 14,
+  "source": "page/index.html — runtime throughput, K/V transport ablation, quality and training-ablation tables; CP scaling data in page/static/js/index.js",
+  "report": "Project-page results · 2026-11-02",
+  "supersedes": "results/results_table.json (KV-exchange matrix, 2026-08-09)",
   "statistics": {
-    "steadyWindow": "per_tick_ms[12:-4]",
-    "aggregation": "pooled p50 across 3 repeats",
+    "hardware": "8× NVIDIA H200",
+    "resolution": "832×480",
     "latentFrames": 399,
-    "outputFrames": 1596,
-    "framesPerTick": 12
+    "outputFrames": 1593,
+    "framesPerTick": 12,
+    "aggregation": "pooled steady tick p50 across 3 fixed repeats",
+    "notes": "DiT FPS includes pipeline fill/drain; E2E FPS additionally includes the streaming VAE; loading and file encoding are excluded."
   },
   "headline": {
-    "bestE2eFps": 117.7,
-    "bestE2eSeconds": 13.56,
-    "bestE2eSpeedup": 7.9,
-    "bestE2eConfig": "4+3 · 1.3B · Sage · causal · paged",
-    "maxSteadyFps": 126.5,
-    "maxSteadyP50Ms": 94.9,
-    "maxSteadyConfig": "4+3 · 1.3B · Sage + W8A8 · causal · paged",
-    "best14bE2eFps": 28.1,
-    "best14bP50Ms": 421.1,
-    "best14bConfig": "4+3 · 14B · Sage + W8A8 · causal · paged",
-    "best52ReliableE2eFps": 85.1,
-    "best52ReliableConfig": "5+2 · 1.3B · Sage · causal · sync",
-    "rawMaxSteadyFps": 127.1,
-    "rawMaxSteadyConfig": "5+2 · 1.3B · Sage + W8A8 · causal · paged · VAE anomaly"
+    "bestE2eFps": 134.81,
+    "bestE2eSeconds": 11.82,
+    "bestE2eSpeedup": 7.07,
+    "bestE2eConfig": "1.3B · 4-step · 4+3 · BF16/FA3 · causal · paged",
+    "singleGpuBaselineE2eFps": 19.06,
+    "maxSteadyFps": 157.79,
+    "maxSteadyConfig": "1.3B · 4-step · 4+3 · Sage + W8A8 · causal · paged",
+    "best5stepE2eFps": 96.48,
+    "best14bE2eFps": 33.5,
+    "best14bSpeedup": 6.08,
+    "maxWpOverFasterCpSageW8A8": 2.53
   },
   "benchmarks": {
-    "1.3b-4+3": {
+    "1.3b-4step": {
       "scale": "1.3B",
+      "steps": 4,
       "topology": "4+3",
-      "weights": "longvideo.pt",
-      "baseline": 106.462,
-      "baselineFps": 15.0,
-      "note": "Best production E2E: Sage · causal · paged at 117.7 FPS.",
+      "weights": "released 4-step checkpoint",
       "rows": {
+        "baseline": {
+          "gpus": 1,
+          "tickP50Ms": null,
+          "steadyFps": null,
+          "ditFps": 33.86,
+          "e2eFps": 19.06,
+          "speedup": 1.0,
+          "runtime": "single-GPU rolling baseline"
+        },
+        "sync": {
+          "gpus": 8,
+          "tickP50Ms": 91.96,
+          "steadyFps": 130.5,
+          "ditFps": 129.31,
+          "e2eFps": 127.06,
+          "speedup": 6.67,
+          "runtime": "Sync · causal · paged"
+        },
         "bf16": {
-          "sync": {"p50": 153.4, "fpsP50": 78.3, "ditFps": 77.3, "e2eFps": 76.7, "speedup": 5.1},
-          "overlap": {"p50": 142.1, "fpsP50": 84.5, "ditFps": 83.8, "e2eFps": 83.1, "speedup": 5.5},
-          "onesided": {"p50": 140.2, "fpsP50": 85.6, "ditFps": 84.6, "e2eFps": 84.0, "speedup": 5.6},
-          "staggered": {"p50": 140.2, "fpsP50": 85.6, "ditFps": 84.8, "e2eFps": 84.2, "speedup": 5.6},
-          "paged": {"p50": 139.1, "fpsP50": 86.3, "ditFps": 85.6, "e2eFps": 84.9, "speedup": 5.7}
+          "gpus": 8,
+          "tickP50Ms": 78.88,
+          "steadyFps": 152.13,
+          "ditFps": 147.58,
+          "e2eFps": 134.81,
+          "speedup": 7.07,
+          "runtime": "BF16/FA3 · causal · paged"
         },
         "sage": {
-          "sync": {"p50": 110.5, "fpsP50": 108.6, "ditFps": 106.4, "e2eFps": 105.4, "speedup": 7.0},
-          "overlap": {"p50": 99.5, "fpsP50": 120.5, "ditFps": 118.8, "e2eFps": 117.5, "speedup": 7.8},
-          "onesided": {"p50": 96.4, "fpsP50": 124.4, "ditFps": 116.5, "e2eFps": 112.8, "speedup": 7.6},
-          "staggered": {"p50": 96.2, "fpsP50": 124.7, "ditFps": 122.2, "e2eFps": 117.4, "speedup": 7.8},
-          "paged": {"p50": 95.4, "fpsP50": 125.7, "ditFps": 124.1, "e2eFps": 117.7, "speedup": 7.9}
+          "gpus": 8,
+          "tickP50Ms": 78.36,
+          "steadyFps": 153.15,
+          "ditFps": 147.78,
+          "e2eFps": 134.79,
+          "speedup": 7.07,
+          "runtime": "Sage · causal · paged"
         },
-        "sagefp8": {
-          "sync": {"p50": 112.0, "fpsP50": 107.1, "ditFps": 103.9, "e2eFps": 102.9, "speedup": 6.9},
-          "overlap": {"p50": 99.6, "fpsP50": 120.5, "ditFps": 116.7, "e2eFps": 115.5, "speedup": 7.7},
-          "onesided": {"p50": 95.8, "fpsP50": 125.3, "ditFps": 121.1, "e2eFps": 115.1, "speedup": 7.7},
-          "staggered": {"p50": 95.7, "fpsP50": 125.4, "ditFps": 121.2, "e2eFps": 116.5, "speedup": 7.8},
-          "paged": {"p50": 94.9, "fpsP50": 126.5, "ditFps": 121.5, "e2eFps": 115.9, "speedup": 7.7}
+        "sage_w8a8": {
+          "gpus": 8,
+          "tickP50Ms": 76.05,
+          "steadyFps": 157.79,
+          "ditFps": 145.47,
+          "e2eFps": 132.89,
+          "speedup": 6.97,
+          "runtime": "Sage + W8A8 · causal · paged"
         }
       }
     },
-    "1.3b-5+2": {
+    "1.3b-5step": {
       "scale": "1.3B",
+      "steps": 5,
       "topology": "5+2",
-      "weights": "longvideo.pt",
-      "baseline": 134.432,
-      "baselineFps": 11.9,
-      "note": "Two-stage VAE caps reliable E2E at ≈85 FPS; orange cells show additional async contention.",
+      "weights": "released 5-step checkpoint",
       "rows": {
+        "baseline": {
+          "gpus": 1,
+          "tickP50Ms": null,
+          "steadyFps": null,
+          "ditFps": 29.12,
+          "e2eFps": 17.46,
+          "speedup": 1.0,
+          "runtime": "single-GPU rolling baseline"
+        },
         "bf16": {
-          "sync": {"p50": 155.7, "fpsP50": 77.1, "ditFps": 75.6, "e2eFps": 74.9, "speedup": 6.3},
-          "overlap": {"p50": 142.9, "fpsP50": 84.0, "ditFps": 82.7, "e2eFps": 82.0, "speedup": 6.9},
-          "onesided": {"p50": 140.6, "fpsP50": 85.4, "ditFps": 83.9, "e2eFps": 83.1, "speedup": 7.0},
-          "staggered": {"p50": 140.2, "fpsP50": 85.6, "ditFps": 84.1, "e2eFps": 83.3, "speedup": 7.0},
-          "paged": {"p50": 138.7, "fpsP50": 86.5, "ditFps": 84.9, "e2eFps": 84.2, "speedup": 7.1}
+          "gpus": 8,
+          "tickP50Ms": 120.53,
+          "steadyFps": 99.56,
+          "ditFps": 104.82,
+          "e2eFps": 96.46,
+          "speedup": 5.52,
+          "runtime": "BF16/FA3 · causal · paged"
         },
         "sage": {
-          "sync": {"p50": 112.9, "fpsP50": 106.3, "ditFps": 103.7, "e2eFps": 85.1, "speedup": 7.2},
-          "overlap": {"p50": 100.5, "fpsP50": 119.4, "ditFps": 117.0, "e2eFps": 59.2, "speedup": 5.0, "anomaly": "VAE contention"},
-          "onesided": {"p50": 96.5, "fpsP50": 124.3, "ditFps": 121.5, "e2eFps": 53.3, "speedup": 4.5, "anomaly": "VAE contention"},
-          "staggered": {"p50": 96.4, "fpsP50": 124.5, "ditFps": 121.5, "e2eFps": 55.2, "speedup": 4.6, "anomaly": "VAE contention"},
-          "paged": {"p50": 94.9, "fpsP50": 126.5, "ditFps": 123.6, "e2eFps": 55.2, "speedup": 4.7, "anomaly": "VAE contention"}
+          "gpus": 8,
+          "tickP50Ms": 120.52,
+          "steadyFps": 99.57,
+          "ditFps": 104.8,
+          "e2eFps": 96.48,
+          "speedup": 5.53,
+          "runtime": "Sage · causal · paged"
         },
-        "sagefp8": {
-          "sync": {"p50": 114.6, "fpsP50": 104.7, "ditFps": 101.5, "e2eFps": 84.7, "speedup": 7.1},
-          "overlap": {"p50": 100.5, "fpsP50": 119.4, "ditFps": 115.6, "e2eFps": 84.9, "speedup": 7.1},
-          "onesided": {"p50": 96.1, "fpsP50": 124.9, "ditFps": 119.5, "e2eFps": 60.6, "speedup": 5.4, "anomaly": "VAE contention"},
-          "staggered": {"p50": 95.8, "fpsP50": 125.3, "ditFps": 120.7, "e2eFps": 53.1, "speedup": 4.5, "anomaly": "VAE contention"},
-          "paged": {"p50": 94.4, "fpsP50": 127.1, "ditFps": 122.1, "e2eFps": 54.2, "speedup": 4.6, "anomaly": "VAE contention"}
+        "sage_w8a8": {
+          "gpus": 8,
+          "tickP50Ms": 120.59,
+          "steadyFps": 99.51,
+          "ditFps": 103.49,
+          "e2eFps": 95.15,
+          "speedup": 5.45,
+          "runtime": "Sage + W8A8 · causal · paged"
         }
       }
     },
-    "14b-4+3": {
+    "14b-4step": {
       "scale": "14B",
+      "steps": 4,
       "topology": "4+3",
-      "weights": "random-init dummy",
-      "baseline": null,
-      "baselineFps": null,
-      "note": "Shape-accurate dummy weights; Sage + W8A8 · causal · paged reaches 28.1 E2E FPS.",
+      "weights": "random-init (system scaling only)",
       "rows": {
+        "baseline": {
+          "gpus": 1,
+          "tickP50Ms": null,
+          "steadyFps": null,
+          "ditFps": 6.31,
+          "e2eFps": 5.51,
+          "speedup": 1.0,
+          "runtime": "single-GPU rolling baseline"
+        },
+        "sync": {
+          "gpus": 8,
+          "tickP50Ms": 464.27,
+          "steadyFps": 25.85,
+          "ditFps": 25.56,
+          "e2eFps": 25.47,
+          "speedup": 4.62,
+          "runtime": "Sync · causal · paged"
+        },
         "bf16": {
-          "sync": {"p50": 701.6, "fpsP50": 17.1, "ditFps": 16.9, "e2eFps": 16.9},
-          "overlap": {"p50": 666.5, "fpsP50": 18.0, "ditFps": 17.8, "e2eFps": 17.8},
-          "onesided": {"p50": 657.2, "fpsP50": 18.3, "ditFps": 18.1, "e2eFps": 18.0},
-          "staggered": {"p50": 657.7, "fpsP50": 18.2, "ditFps": 18.1, "e2eFps": 18.0},
-          "paged": {"p50": 649.8, "fpsP50": 18.5, "ditFps": 18.3, "e2eFps": 18.2}
+          "gpus": 8,
+          "tickP50Ms": 413.8,
+          "steadyFps": 29.0,
+          "ditFps": 28.74,
+          "e2eFps": 28.64,
+          "speedup": 5.2,
+          "runtime": "BF16/FA3 · causal · paged"
         },
         "sage": {
-          "sync": {"p50": 531.7, "fpsP50": 22.6, "ditFps": 22.2, "e2eFps": 22.2},
-          "overlap": {"p50": 501.6, "fpsP50": 23.9, "ditFps": 23.6, "e2eFps": 23.6},
-          "onesided": {"p50": 488.1, "fpsP50": 24.6, "ditFps": 24.1, "e2eFps": 24.0},
-          "staggered": {"p50": 487.8, "fpsP50": 24.6, "ditFps": 24.3, "e2eFps": 24.2},
-          "paged": {"p50": 480.2, "fpsP50": 25.0, "ditFps": 24.7, "e2eFps": 24.6}
+          "gpus": 8,
+          "tickP50Ms": 414.03,
+          "steadyFps": 28.98,
+          "ditFps": 28.72,
+          "e2eFps": 28.62,
+          "speedup": 5.19,
+          "runtime": "Sage · causal · paged"
         },
-        "sagefp8": {
-          "sync": {"p50": 474.3, "fpsP50": 25.3, "ditFps": 25.0, "e2eFps": 24.9},
-          "overlap": {"p50": 440.2, "fpsP50": 27.3, "ditFps": 26.9, "e2eFps": 26.9},
-          "onesided": {"p50": 429.1, "fpsP50": 28.0, "ditFps": 27.3, "e2eFps": 27.3},
-          "staggered": {"p50": 428.9, "fpsP50": 28.0, "ditFps": 27.6, "e2eFps": 27.6},
-          "paged": {"p50": 421.1, "fpsP50": 28.5, "ditFps": 28.1, "e2eFps": 28.1}
+        "sage_w8a8": {
+          "gpus": 8,
+          "tickP50Ms": 354.45,
+          "steadyFps": 33.86,
+          "ditFps": 33.64,
+          "e2eFps": 33.5,
+          "speedup": 6.08,
+          "runtime": "Sage + W8A8 · causal · paged"
         }
       }
     }
+  },
+  "kvTransportAblation": {
+    "metric": "pooled steady tick p50 (ms, lower is better), 4-step 8-GPU 4+1+3",
+    "rows": [
+      {
+        "backbone": "1.3B",
+        "compute": "BF16",
+        "sync": 91.956,
+        "overlap": 85.73,
+        "oneSided": 81.669,
+        "staggered": 81.953,
+        "paged": 78.882
+      },
+      {
+        "backbone": "1.3B",
+        "compute": "Sage",
+        "sync": 91.441,
+        "overlap": 84.103,
+        "oneSided": 80.934,
+        "staggered": 81.062,
+        "paged": 78.356
+      },
+      {
+        "backbone": "1.3B",
+        "compute": "Sage+W8A8",
+        "sync": 88.714,
+        "overlap": 81.595,
+        "oneSided": 78.03,
+        "staggered": 78.081,
+        "paged": 76.052
+      },
+      {
+        "backbone": "14B",
+        "compute": "BF16",
+        "sync": 464.27,
+        "overlap": 449.689,
+        "oneSided": 425.907,
+        "staggered": 425.188,
+        "paged": 413.795
+      },
+      {
+        "backbone": "14B",
+        "compute": "Sage",
+        "sync": 467.526,
+        "overlap": 439.988,
+        "oneSided": 426.215,
+        "staggered": 425.601,
+        "paged": 414.029
+      },
+      {
+        "backbone": "14B",
+        "compute": "Sage+W8A8",
+        "sync": 407.215,
+        "overlap": 379.576,
+        "oneSided": 365.922,
+        "staggered": 366.697,
+        "paged": 354.447
+      }
+    ]
+  },
+  "contextParallelism": {
+    "metric": "DiT-only throughput FPS (dummy weights, VAE disabled)",
+    "rows": [
+      {
+        "scale": "1.3B",
+        "compute": "BF16",
+        "ulyssesFps": 80.6,
+        "ringFps": 41.19,
+        "wpFps": 150.09,
+        "wpOverFasterCp": 1.862,
+        "flags": "wr"
+      },
+      {
+        "scale": "1.3B",
+        "compute": "Sage",
+        "ulyssesFps": 84.01,
+        "ringFps": 56.99,
+        "wpFps": 151.15,
+        "wpOverFasterCp": 1.799,
+        "flags": ""
+      },
+      {
+        "scale": "1.3B",
+        "compute": "Sage+W8A8",
+        "ulyssesFps": 61.17,
+        "ringFps": 45.96,
+        "wpFps": 154.75,
+        "wpOverFasterCp": 2.53,
+        "flags": ""
+      },
+      {
+        "scale": "3B",
+        "compute": "BF16",
+        "ulyssesFps": 75.38,
+        "ringFps": 38.2,
+        "wpFps": 88.86,
+        "wpOverFasterCp": 1.179,
+        "flags": ""
+      },
+      {
+        "scale": "3B",
+        "compute": "Sage",
+        "ulyssesFps": 75.93,
+        "ringFps": 37.0,
+        "wpFps": 89.26,
+        "wpOverFasterCp": 1.176,
+        "flags": ""
+      },
+      {
+        "scale": "3B",
+        "compute": "Sage+W8A8",
+        "ulyssesFps": 56.15,
+        "ringFps": 36.04,
+        "wpFps": 95.31,
+        "wpOverFasterCp": 1.697,
+        "flags": ""
+      },
+      {
+        "scale": "5B",
+        "compute": "BF16",
+        "ulyssesFps": 58.4,
+        "ringFps": 41.42,
+        "wpFps": 68.33,
+        "wpOverFasterCp": 1.17,
+        "flags": ""
+      },
+      {
+        "scale": "5B",
+        "compute": "Sage",
+        "ulyssesFps": 63.13,
+        "ringFps": 30.37,
+        "wpFps": 67.0,
+        "wpOverFasterCp": 1.061,
+        "flags": ""
+      },
+      {
+        "scale": "5B",
+        "compute": "Sage+W8A8",
+        "ulyssesFps": 60.71,
+        "ringFps": 31.17,
+        "wpFps": 75.44,
+        "wpOverFasterCp": 1.243,
+        "flags": ""
+      },
+      {
+        "scale": "7B",
+        "compute": "BF16",
+        "ulyssesFps": 49.89,
+        "ringFps": 38.96,
+        "wpFps": 53.28,
+        "wpOverFasterCp": 1.068,
+        "flags": ""
+      },
+      {
+        "scale": "7B",
+        "compute": "Sage",
+        "ulyssesFps": 52.7,
+        "ringFps": 25.75,
+        "wpFps": 53.5,
+        "wpOverFasterCp": 1.015,
+        "flags": "uwr"
+      },
+      {
+        "scale": "7B",
+        "compute": "Sage+W8A8",
+        "ulyssesFps": 56.12,
+        "ringFps": 26.56,
+        "wpFps": 61.55,
+        "wpOverFasterCp": 1.097,
+        "flags": ""
+      },
+      {
+        "scale": "9B",
+        "compute": "BF16",
+        "ulyssesFps": 46.41,
+        "ringFps": 38.94,
+        "wpFps": 45.7,
+        "wpOverFasterCp": 0.985,
+        "flags": "uwr"
+      },
+      {
+        "scale": "9B",
+        "compute": "Sage",
+        "ulyssesFps": 45.26,
+        "ringFps": 22.73,
+        "wpFps": 45.59,
+        "wpOverFasterCp": 1.007,
+        "flags": ""
+      },
+      {
+        "scale": "9B",
+        "compute": "Sage+W8A8",
+        "ulyssesFps": 52.51,
+        "ringFps": 24.16,
+        "wpFps": 53.84,
+        "wpOverFasterCp": 1.025,
+        "flags": ""
+      },
+      {
+        "scale": "14B",
+        "compute": "BF16",
+        "ulyssesFps": 26.72,
+        "ringFps": 23.9,
+        "wpFps": 28.71,
+        "wpOverFasterCp": 1.075,
+        "flags": ""
+      },
+      {
+        "scale": "14B",
+        "compute": "Sage",
+        "ulyssesFps": 27.9,
+        "ringFps": 16.32,
+        "wpFps": 28.72,
+        "wpOverFasterCp": 1.029,
+        "flags": ""
+      },
+      {
+        "scale": "14B",
+        "compute": "Sage+W8A8",
+        "ulyssesFps": 30.98,
+        "ringFps": 17.16,
+        "wpFps": 33.6,
+        "wpOverFasterCp": 1.085,
+        "flags": ""
+      }
+    ]
+  },
+  "quality": {
+    "benchmark": "VBench-Long, 10 quality prompts, 399 latent frames, 16 fps, seed 42",
+    "rows": [
+      {
+        "method": "Rolling Forcing",
+        "steps": 5.0,
+        "gpus": 1.0,
+        "vbenchShortTotal": 81.15,
+        "vbenchShortQuality": 83.77,
+        "vbenchShortSemantic": 70.66,
+        "vbenchShortDynamic": 51.39,
+        "vbenchLongQuality": 81.18,
+        "vbenchLongDynamic": 36.63,
+        "subjectPreservation": 92.75,
+        "cameraDrift": 0.17,
+        "ditFps": 29.12,
+        "e2eFps": 17.46
+      },
+      {
+        "method": "+ Causal Attention",
+        "steps": 5.0,
+        "gpus": 8.0,
+        "vbenchShortTotal": 80.89,
+        "vbenchShortQuality": 83.35,
+        "vbenchShortSemantic": 71.05,
+        "vbenchShortDynamic": 37.5,
+        "vbenchLongQuality": 80.5,
+        "vbenchLongDynamic": 46.6,
+        "subjectPreservation": 91.26,
+        "cameraDrift": 0.4,
+        "ditFps": 104.85,
+        "e2eFps": 96.56
+      },
+      {
+        "method": "Causal Forcing (Full Attn.)",
+        "steps": 4.0,
+        "gpus": 1.0,
+        "vbenchShortTotal": 79.61,
+        "vbenchShortQuality": 82.83,
+        "vbenchShortSemantic": 66.72,
+        "vbenchShortDynamic": 100.0,
+        "vbenchLongQuality": 82.15,
+        "vbenchLongDynamic": 96.61,
+        "subjectPreservation": 71.11,
+        "cameraDrift": 11.14,
+        "ditFps": 33.88,
+        "e2eFps": 19.06
+      },
+      {
+        "method": "Wave Forcing (Ours)",
+        "steps": 4.0,
+        "gpus": 8.0,
+        "vbenchShortTotal": 80.74,
+        "vbenchShortQuality": 83.93,
+        "vbenchShortSemantic": 67.95,
+        "vbenchShortDynamic": 84.72,
+        "vbenchLongQuality": 80.89,
+        "vbenchLongDynamic": 74.97,
+        "subjectPreservation": 91.88,
+        "cameraDrift": 0.36,
+        "ditFps": 147.58,
+        "e2eFps": 134.81
+      },
+      {
+        "method": "+ SageAttention",
+        "steps": null,
+        "gpus": 8.0,
+        "vbenchShortTotal": 81.03,
+        "vbenchShortQuality": 84.02,
+        "vbenchShortSemantic": 69.07,
+        "vbenchShortDynamic": 65.28,
+        "vbenchLongQuality": 81.16,
+        "vbenchLongDynamic": 77.24,
+        "subjectPreservation": 90.79,
+        "cameraDrift": 0.36,
+        "ditFps": 147.78,
+        "e2eFps": 134.79
+      },
+      {
+        "method": "Wave Forcing (Ours)",
+        "steps": 5.0,
+        "gpus": 8.0,
+        "vbenchShortTotal": 81.64,
+        "vbenchShortQuality": 84.4,
+        "vbenchShortSemantic": 70.59,
+        "vbenchShortDynamic": 94.44,
+        "vbenchLongQuality": 81.26,
+        "vbenchLongDynamic": 91.45,
+        "subjectPreservation": 97.1,
+        "cameraDrift": 0.37,
+        "ditFps": 104.82,
+        "e2eFps": 96.46
+      },
+      {
+        "method": "+ SageAttention",
+        "steps": null,
+        "gpus": 8.0,
+        "vbenchShortTotal": 81.02,
+        "vbenchShortQuality": 83.92,
+        "vbenchShortSemantic": 69.41,
+        "vbenchShortDynamic": 80.56,
+        "vbenchLongQuality": 81.14,
+        "vbenchLongDynamic": 91.14,
+        "subjectPreservation": 94.43,
+        "cameraDrift": 0.37,
+        "ditFps": 104.8,
+        "e2eFps": 96.48
+      }
+    ]
+  },
+  "trainingAblation": {
+    "benchmark": "VBench-Long scores, 4-step models",
+    "rows": [
+      {
+        "model": "w/o off-policy DMD",
+        "quality": 76.68,
+        "dynamic": 15.73,
+        "subject": 76.53,
+        "drift": 0.26
+      },
+      {
+        "model": "w/o RF",
+        "quality": 80.19,
+        "dynamic": 88.82,
+        "subject": 77.48,
+        "drift": 6.24
+      },
+      {
+        "model": "w/o WF",
+        "quality": 80.34,
+        "dynamic": 48.12,
+        "subject": 95.64,
+        "drift": 0.1
+      },
+      {
+        "model": "w/o SF",
+        "quality": 75.35,
+        "dynamic": 23.66,
+        "subject": 84.04,
+        "drift": 1.89
+      },
+      {
+        "model": "Ours full",
+        "quality": 80.89,
+        "dynamic": 74.97,
+        "subject": 91.88,
+        "drift": 0.36
+      }
+    ]
   }
 }

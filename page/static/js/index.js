@@ -1,566 +1,344 @@
-(() => {
-  'use strict';
+(function () {
+  "use strict";
 
-  const colors = ['#20d7d0', '#8b7cff', '#c8ff58', '#ff9a5b', '#64a8ff', '#ff6f91', '#f7d154', '#70e3a2'];
-  const maxTick = 14;
-  let tick = 0;
-  let playing = true;
-  let intervalMs = 800;
-  let timer;
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var $ = function (sel, root) { return (root || document).querySelector(sel); };
+  var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
 
-  const $ = (selector) => document.querySelector(selector);
-  const timeline = $('#timeline');
-  const playButton = $('#playButton');
-  const stepButton = $('#stepButton');
-  const wavefrontMatrix = $('#wavefrontMatrix');
-  const pipelineStages = [
-    { id: 'D₁', role: 'denoise 1', group: 'diffusion' },
-    { id: 'D₂', role: 'denoise 2', group: 'diffusion' },
-    { id: 'D₃', role: 'denoise 3', group: 'diffusion' },
-    { id: 'D₄', role: 'denoise 4', group: 'diffusion' },
-    { id: 'KV', role: 'clean store', group: 'store' },
-    { id: 'V₁', role: 'VAE early', group: 'vae' },
-    { id: 'V₂', role: 'VAE middle', group: 'vae' },
-    { id: 'V₃', role: 'VAE output', group: 'vae' }
-  ];
-
-  function buildWavefrontMatrix() {
-    const cells = [
-      '<div class="matrix-corner"><b>Stage ID →</b><span>GPU ID ↓</span></div>',
-      '<div class="matrix-group diffusion-group">Wave diffusion · full-model replicas</div>',
-      '<div class="matrix-group vae-group">Streaming VAE · time-balanced</div>'
-    ];
-
-    pipelineStages.forEach((stage, stageIndex) => {
-      const boundary = stageIndex === 5 ? ' vae-boundary' : '';
-      cells.push(`<div class="matrix-stage-label ${stage.group}${boundary}" style="grid-column:${stageIndex + 2};grid-row:2"><b>${stage.id}</b><span>${stage.role}</span></div>`);
-    });
-
-    pipelineStages.forEach((ownedStage, gpuIndex) => {
-      const row = gpuIndex + 3;
-      const rowBoundary = gpuIndex === 5 ? ' vae-row-boundary' : '';
-      cells.push(`<div class="matrix-gpu-label ${ownedStage.group}${rowBoundary}" style="grid-column:1;grid-row:${row}"><b>GPU ${gpuIndex}</b><span>replica ${gpuIndex}</span></div>`);
-      pipelineStages.forEach((stage, stageIndex) => {
-        const mapped = gpuIndex === stageIndex;
-        const kvReturn = gpuIndex < stageIndex && stageIndex <= 4;
-        const divider = stageIndex === 5 ? ' vae-boundary' : '';
-        const cellType = mapped ? `mapped ${stage.group}` : (kvReturn ? 'kv-return-cell' : 'unmapped');
-        const classes = `matrix-cell ${cellType}${divider}${rowBoundary}`;
-        const label = mapped
-          ? `<span class="matrix-coordinate">GPU ${gpuIndex} · ${stage.id}</span><span class="matrix-idle">idle</span>`
-          : (kvReturn ? '<span class="kv-pending">KV</span>' : '');
-        const accessibility = mapped
-          ? `aria-label="GPU ${gpuIndex}, stage ${stage.role}"`
-          : (kvReturn ? `aria-label="GPU ${gpuIndex} receives KV from ${stage.role}"` : 'aria-hidden="true"');
-        cells.push(`<div class="${classes}" data-stage="${stageIndex}" data-source-stage="${kvReturn ? stageIndex : ''}" style="grid-column:${stageIndex + 2};grid-row:${row}" ${accessibility}>${label}</div>`);
-      });
-    });
-
-    wavefrontMatrix.innerHTML = cells.join('');
+  /* ---------- nav: highlight the section in view ---------- */
+  var navLinks = $$(".nav-links a[href^='#']");
+  var sections = navLinks.map(function (a) { return $(a.getAttribute("href")); }).filter(Boolean);
+  function updateNav() {
+    var y = window.scrollY + 120;
+    var current = null;
+    sections.forEach(function (sec) { if (sec.offsetTop <= y) current = sec.id; });
+    navLinks.forEach(function (a) { a.classList.toggle("active", a.getAttribute("href") === "#" + current); });
   }
+  window.addEventListener("scroll", updateNav, { passive: true });
+  updateNav();
 
-  buildWavefrontMatrix();
-
-  function chunkHTML(chunkIndex, labelPrefix = 'C') {
-    const color = colors[chunkIndex % colors.length];
-    return `<span class="matrix-chunk" style="--chunk:${color}"><b>${labelPrefix}${chunkIndex + 1}</b></span>`;
-  }
-
-  function phaseFor(currentTick) {
-    if (currentTick < 4) return {
-      title: 'Filling the wavefront',
-      description: `Chunk C${currentTick + 1} enters GPU 0 / D₁ while earlier colors advance diagonally. Pale cells fan up-left as each cleaner stage publishes its KV.`
-    };
-    if (currentTick < 7) return {
-      title: 'Diffusion at full occupancy',
-      description: 'GPU 0–4 are active across D₁–D₄ and the clean-KV stage. A completed latent now crosses the vertical boundary toward V₁.'
-    };
-    if (currentTick < 9) return {
-      title: 'Overlapping generation and decode',
-      description: 'New colors continue across diffusion while earlier colors advance through the independent V₁–V₃ decode stages.'
-    };
-    return {
-      title: 'Steady state: one chunk per tick',
-      description: 'The active diagonal spans all eight GPU–stage pairs; the light upper triangle confirms that every required cleaner-stage KV has arrived.'
-    };
-  }
-
-  function render() {
-    let active = 0;
-    wavefrontMatrix.querySelectorAll('.matrix-cell.mapped').forEach((cell, stageIndex) => {
-      const chunkIndex = tick - stageIndex;
-      const stage = pipelineStages[stageIndex];
-      const coordinate = `<span class="matrix-coordinate">GPU ${stageIndex} · ${stage.id}</span>`;
-      if (chunkIndex >= 0) {
-        cell.classList.add('active');
-        cell.innerHTML = coordinate + chunkHTML(chunkIndex);
-        active += 1;
-      } else {
-        cell.classList.remove('active');
-        cell.innerHTML = `${coordinate}<span class="matrix-idle">${stage.group === 'vae' ? 'waiting' : 'idle'}</span>`;
-      }
-    });
-
-    wavefrontMatrix.querySelectorAll('.matrix-cell.kv-return-cell').forEach(cell => {
-      const sourceStage = Number(cell.dataset.sourceStage);
-      const chunkIndex = tick - sourceStage;
-      if (chunkIndex >= 0) {
-        const color = colors[chunkIndex % colors.length];
-        cell.style.setProperty('--kv', color);
-        cell.classList.add('kv-ready');
-        cell.innerHTML = `<span class="kv-arrived" style="--kv:${color}"><i></i><b>KV</b><span>C${chunkIndex + 1}</span></span>`;
-      } else {
-        cell.style.removeProperty('--kv');
-        cell.classList.remove('kv-ready');
-        cell.innerHTML = '<span class="kv-pending">KV</span>';
-      }
-    });
-
-    const phase = phaseFor(tick);
-    $('#phaseTitle').textContent = phase.title;
-    $('#phaseDescription').textContent = phase.description;
-    $('#activeCount').textContent = active;
-    $('#outputCount').textContent = Math.max(0, tick - 7);
-    $('#tickOutput').textContent = tick;
-    timeline.value = tick;
-    timeline.style.setProperty('--progress', `${(tick / maxTick) * 100}%`);
-  }
-
-  function setPlaying(next) {
-    playing = next;
-    clearInterval(timer);
-    const icon = playButton.querySelector('span');
-    const label = playButton.querySelector('b');
-    icon.className = playing ? 'pause-icon' : 'play-icon';
-    label.textContent = playing ? 'Pause' : 'Play';
-    playButton.setAttribute('aria-label', playing ? 'Pause animation' : 'Play animation');
-    if (playing) timer = setInterval(advance, intervalMs);
-  }
-
-  function advance() {
-    tick = tick >= maxTick ? 0 : tick + 1;
-    render();
-  }
-
-  playButton.addEventListener('click', () => setPlaying(!playing));
-  stepButton.addEventListener('click', () => {
-    setPlaying(false);
-    advance();
-  });
-  timeline.addEventListener('input', (event) => {
-    tick = Number(event.target.value);
-    setPlaying(false);
-    render();
-  });
-  document.querySelectorAll('[data-speed]').forEach(button => {
-    button.addEventListener('click', () => {
-      document.querySelectorAll('[data-speed]').forEach(item => item.classList.remove('active'));
-      button.classList.add('active');
-      intervalMs = Number(button.dataset.speed);
-      if (playing) setPlaying(true);
-    });
-  });
-
-  // Layer-level A/B schedule: synchronized exchange vs. communication hidden by
-  // the causal compute imbalance. Values are conceptual proportions, not a trace.
-  const scheduleSpecs = {};
-  const rankSchedules = [
-    { key: 'r0', syncCompute: 12.0, overlapCompute: 15.7, type: 'compute' },
-    { key: 'r1', syncCompute: 10.7, overlapCompute: 13.5, type: 'compute secondary shade-1' },
-    { key: 'r2', syncCompute: 9.4, overlapCompute: 11.8, type: 'compute secondary shade-2' },
-    { key: 'r3', syncCompute: 8.1, overlapCompute: 10.0, type: 'compute secondary shade-3' },
-    { key: 'store', syncCompute: 6.8, overlapCompute: 8.4, type: 'compute secondary shade-4' }
-  ];
-  rankSchedules.forEach(rank => {
-    scheduleSpecs[`.sync-${rank.key}`] = [];
-    scheduleSpecs[`.overlap-${rank.key}`] = [];
-  });
-  scheduleSpecs['.sync-link'] = [];
-  scheduleSpecs['.overlap-link'] = [];
-
-  const layerCount = 6;
-  const cycle = 100 / layerCount;
-  const syncCommStart = 12.0;
-  for (let layer = 0; layer < layerCount; layer += 1) {
-    const base = layer * cycle;
-    const layerName = `L${layer ? `+${layer}` : ''}`;
-    rankSchedules.forEach(rank => {
-      scheduleSpecs[`.sync-${rank.key}`].push(
-        { start: base, width: rank.syncCompute, type: rank.type, text: `${rank.key} · ${layerName}` },
-        { start: base + rank.syncCompute, width: cycle - rank.syncCompute, type: 'wait', text: rank.key === 'r0' ? 'barrier' : 'wait' }
-      );
-      scheduleSpecs[`.overlap-${rank.key}`].push(
-        { start: base, width: rank.overlapCompute, type: rank.type, text: `${rank.key} · ${layerName}` },
-        { start: base + rank.overlapCompute, width: cycle - rank.overlapCompute, type: rank.key === 'r0' ? 'wait' : 'slack', text: rank.key === 'r0' ? 'gate' : 'slack' }
-      );
-      if (rank.key !== 'r0') {
-        scheduleSpecs[`.overlap-${rank.key}`].push(
-          { start: base + rank.overlapCompute - 1.8, width: 1.8, type: 'comm publish', text: 'KV↑' }
-        );
-      }
-    });
-    scheduleSpecs['.sync-link'].push(
-      { start: base + syncCommStart, width: cycle - syncCommStart, type: 'comm', text: `all_gather ${layerName}` }
-    );
-    scheduleSpecs['.overlap-link'].push(
-      { start: base + 8.4, width: 5.8, type: 'comm', text: `prefetch ${layer < layerCount - 1 ? `L+${layer + 1}` : 'next'}` }
-    );
-  }
-
-  Object.entries(scheduleSpecs).forEach(([selector, segments]) => {
-    const track = $(selector);
-    segments.forEach(spec => {
-      const segment = document.createElement('span');
-      segment.className = `timeline-segment ${spec.type}`;
-      segment.style.left = `${spec.start}%`;
-      segment.style.width = `${spec.width}%`;
-      segment.dataset.start = spec.start;
-      segment.dataset.end = spec.start + spec.width;
-      segment.textContent = spec.text;
-      track.appendChild(segment);
-    });
-  });
-
-  const scheduleButton = $('#schedulePlay');
-  const scheduleProgress = $('#scheduleProgress');
-  const scheduleClock = $('#scheduleClock');
-  let schedulePlaying = true;
-  let schedulePosition = 0;
-  let scheduleLast = performance.now();
-  const scheduleDuration = 6200;
-
-  function renderSchedule() {
-    const percent = schedulePosition * 100;
-    scheduleProgress.style.width = `${percent}%`;
-    scheduleClock.textContent = `${Math.round(schedulePosition * 600)} μs`;
-    document.querySelectorAll('.schedule-canvas').forEach(canvas => {
-      const track = canvas.querySelector('.lane-track');
-      const cursor = canvas.querySelector('.schedule-cursor');
-      cursor.style.left = `${track.offsetLeft + track.clientWidth * schedulePosition}px`;
-    });
-    document.querySelectorAll('.timeline-segment').forEach(segment => {
-      const start = Number(segment.dataset.start);
-      const end = Number(segment.dataset.end);
-      segment.classList.toggle('current', percent >= start && percent < end);
-    });
-  }
-
-  function runSchedule(now) {
-    if (schedulePlaying) {
-      schedulePosition = (schedulePosition + (now - scheduleLast) / scheduleDuration) % 1;
-      renderSchedule();
-    }
-    scheduleLast = now;
-    requestAnimationFrame(runSchedule);
-  }
-
-  scheduleButton.addEventListener('click', () => {
-    schedulePlaying = !schedulePlaying;
-    const icon = scheduleButton.querySelector('span');
-    icon.className = schedulePlaying ? 'pause-icon' : 'play-icon';
-    scheduleButton.querySelector('b').textContent = schedulePlaying ? 'Pause comparison' : 'Play comparison';
-  });
-  window.addEventListener('resize', renderSchedule);
-  requestAnimationFrame(runSchedule);
-
-  const transportModes = {
-    sync: {
-      step: 'Baseline · synchronized BF16',
-      title: 'Every rank joins; every byte is full width.',
-      description: 'Blocking all_gather moves BF16 KV through a matching collective. The consumer then concatenates received segments into an attention buffer at every layer.',
-      engine: 'NCCL collective', bandwidth: 'BF16 · 2 bytes / value', action: 'Receive, then assemble',
-      metricLabel: 'Critical-path communication', metricValue: '≈79 ms', metricNote: '14B diagnostic'
-    },
-    fp8: {
-      step: 'Optimization 1 · shrink the payload',
-      title: 'FP8 cuts the KV payload in half.',
-      description: 'Quantizing exchanged KV from BF16 to FP8 halves DMA bytes and raw communication time. The collective barrier and destination assembly remain, and quant/dequant adds a new toll.',
-      engine: 'NCCL collective', bandwidth: 'FP8 · 1 byte / value', action: 'Dequantize, then assemble',
-      metricLabel: 'Raw communication', metricValue: '≈40 ms', metricNote: '≈79 → 40 ms; standalone win'
-    },
-    ce: {
-      step: 'Optimization 2 · change the transport',
-      title: 'Copy Engine writes remote memory directly.',
-      description: 'cuMemcpyPeerAsync pushes KV into an IPC-mapped consumer slab over NVLink. A generation flag releases the consumer, replacing matching NCCL send/recv synchronization without stealing SM compute.',
-      engine: 'CE · one-sided NVLink', bandwidth: 'BF16 · remote IPC write', action: 'Wait on flag, then assemble',
-      metricLabel: '14B steady tick', metricValue: '583 ms', metricNote: '645 → 583 ms · +10.4%'
-    },
-    paged: {
-      step: 'Optimization 3 · write the final layout',
-      title: 'Producers land KV in attention-ready slots.',
-      description: 'The copy engine writes each segment into a fixed per-(generation, layer) slot. The consumer reads one contiguous prefix in place, eliminating the per-layer torch.cat assembly wall.',
-      engine: 'CE · paged direct-write', bandwidth: 'BF16 · fixed destination slots', action: 'Read contiguous prefix in place',
-      metricLabel: 'r0 per-layer assembly', metricValue: '4.08 ms', metricNote: '18.49 → 4.08 ms'
-    }
-  };
-  const transportVisual = $('.transport-visual');
-  const transportButtons = [...document.querySelectorAll('[data-transport]')];
-  let transportIndex = 0;
-  let transportAuto = true;
-
-  function setTransportMode(mode) {
-    const data = transportModes[mode];
-    transportIndex = transportButtons.findIndex(button => button.dataset.transport === mode);
-    transportVisual.dataset.mode = mode;
-    $('#transportStep').textContent = data.step;
-    $('#transportTitle').textContent = data.title;
-    $('#transportDescription').textContent = data.description;
-    $('#routeEngine').textContent = data.engine;
-    $('#routeBandwidth').textContent = data.bandwidth;
-    $('#consumerAction').textContent = data.action;
-    $('#metricLabel').textContent = data.metricLabel;
-    $('#metricValue').textContent = data.metricValue;
-    $('#metricNote').textContent = data.metricNote;
-    transportButtons.forEach(button => {
-      const active = button.dataset.transport === mode;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
-  }
-
-  transportButtons.forEach(button => button.addEventListener('click', () => {
-    transportAuto = false;
-    setTransportMode(button.dataset.transport);
-  }));
-  $('.transport-explorer').addEventListener('mouseenter', () => { transportAuto = false; });
-  setInterval(() => {
-    if (!transportAuto) return;
-    const next = (transportIndex + 1) % transportButtons.length;
-    setTransportMode(transportButtons[next].dataset.transport);
-  }, 4200);
-
-  let vaePhase = 0;
-  const vaePipelineGrid = $('#vaeWaveGrid');
-  const vaeCursor = $('#vaeGridCursor');
-  const vaeTicks = [...vaePipelineGrid.querySelectorAll('.vwg-tick')];
-  function renderVaePhase() {
-    vaePipelineGrid.querySelectorAll('[data-vae-phase]').forEach(cell => {
-      cell.classList.toggle('vae-current', Number(cell.dataset.vaePhase) === vaePhase);
-    });
-    if (vaeTicks[vaePhase]) vaeCursor.style.left = `${vaeTicks[vaePhase].offsetLeft}px`;
-  }
-  renderVaePhase();
-  setInterval(() => {
-    vaePhase = (vaePhase + 1) % 4;
-    renderVaePhase();
-  }, 900);
-  window.addEventListener('resize', renderVaePhase);
-
-  const benchmarkTierLabels = {
-    bf16: { name: 'BF16', detail: 'Base precision' },
-    sage: { name: 'Sage', detail: 'SageAttention' },
-    sagefp8: { name: 'Sage + W8A8', detail: 'Compute quantization' }
-  };
-  const benchmarkModes = ['sync', 'overlap', 'onesided', 'staggered', 'paged'];
-  const benchmarkButtons = [...document.querySelectorAll('[data-benchmark]')];
-  const benchmarkBody = $('#benchmarkBody');
-  let benchmarkData;
-
-  function benchmarkCell(cell, isE2eBest, isSteadyBest) {
-    if (!cell) return '<span class="benchmark-empty" aria-label="Not measured">—</span>';
-    const classes = ['benchmark-cell'];
-    if (isE2eBest) classes.push('best');
-    if (isSteadyBest) classes.push('steady-best');
-    if (cell.anomaly) classes.push('anomaly');
-    const speedup = Number.isFinite(cell.speedup) ? ` · ${cell.speedup.toFixed(1)}×` : '';
-    const warning = cell.anomaly ? `<b class="benchmark-anomaly">${cell.anomaly}</b>` : '';
-    return `<div class="${classes.join(' ')}"><strong class="e2e-hero">${cell.e2eFps.toFixed(1)}<em> E2E FPS</em></strong><small>${cell.p50.toFixed(1)} ms${speedup}</small><small class="wall-fps">DiT ${cell.ditFps.toFixed(1)} · FPS(p50) ${cell.fpsP50.toFixed(1)}</small>${warning}</div>`;
-  }
-
-  function renderBenchmark(key) {
-    if (!benchmarkData || !benchmarkData.benchmarks[key]) return;
-    const data = benchmarkData.benchmarks[key];
-    const available = Object.values(data.rows).flatMap(row => benchmarkModes.map(mode => row[mode]).filter(Boolean));
-    const bestP50 = Math.min(...available.map(cell => cell.p50));
-    const bestE2e = Math.max(...available.map(cell => cell.e2eFps));
-
-    $('#benchmarkTitle').textContent = `${data.scale} · ${data.topology}`;
-    $('#benchmarkBaseline').textContent = Number.isFinite(data.baseline) ? `${benchmarkData.statistics.outputFrames} frames @ ${data.baselineFps.toFixed(1)} FPS` : 'Not recorded · dummy';
-    const scope = Number.isFinite(data.baseline)
-      ? `Pooled ${benchmarkData.statistics.steadyWindow} · ${benchmarkData.statistics.framesPerTick} frames/tick. DiT and E2E use ${benchmarkData.statistics.outputFrames} output frames; × uses the ${data.baseline.toFixed(3)} s baseline.`
-      : `Pooled ${benchmarkData.statistics.steadyWindow} · shape-accurate ${data.weights}; DiT/E2E use ${benchmarkData.statistics.outputFrames} output frames. No 14B single-GPU baseline.`;
-    $('#benchmarkFoot').textContent = `${scope} ${data.note || ''}`.trim();
-
-    benchmarkBody.innerHTML = Object.entries(benchmarkTierLabels).map(([tier, label]) => {
-      const row = data.rows[tier] || {};
-      const cells = benchmarkModes.map(mode => {
-        const cell = row[mode];
-        return `<td>${benchmarkCell(cell, cell && cell.e2eFps === bestE2e, cell && cell.p50 === bestP50)}</td>`;
-      }).join('');
-      return `<tr><td><div class="benchmark-tier ${tier}"><i></i><div><span>${label.name}</span><b>${label.detail}</b></div></div></td>${cells}</tr>`;
-    }).join('');
-
-    benchmarkButtons.forEach(button => {
-      const active = button.dataset.benchmark === key;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-selected', active ? 'true' : 'false');
-      button.tabIndex = active ? 0 : -1;
-    });
-  }
-
-  benchmarkButtons.forEach(button => button.addEventListener('click', () => renderBenchmark(button.dataset.benchmark)));
-  fetch('static/data/results_summary.json')
-    .then(response => {
-      if (!response.ok) throw new Error(`Benchmark data returned ${response.status}`);
-      return response.json();
-    })
-    .then(data => {
-      benchmarkData = data;
-      renderBenchmark('1.3b-4+3');
-    })
-    .catch(error => {
-      benchmarkBody.innerHTML = '<tr><td colspan="6" class="benchmark-load-error">Benchmark summary could not be loaded.</td></tr>';
-      console.error(error);
-    });
-
-  const qualityTableHead = $('#qualityTableHead');
-  const qualityTableBody = $('#qualityTableBody');
-
-  function renderQualitySummary(data) {
-    qualityTableHead.innerHTML = '<th>Model</th><th>Runtime</th>' + data.metrics.map(metric =>
-      `<th>${metric.label}${metric.key === 'quality_drift' ? '&nbsp;↓' : metric.key === 'fps' ? '&nbsp;↑' : ''}</th>`
-    ).join('');
-    const grouped = data.columns.reduce((groups, column) => {
-      (groups[column.model] ||= []).push(column);
-      return groups;
-    }, {});
-    const better = new Set();
-    Object.values(grouped).forEach(columns => {
-      data.metrics.forEach(metric => {
-        const finite = columns.filter(column => Number.isFinite(metric.values[column.key]));
-        if (!finite.length) return;
-        const values = finite.map(column => metric.values[column.key]);
-        const target = metric.key === 'quality_drift' ? Math.min(...values) : Math.max(...values);
-        finite.filter(column => metric.values[column.key] === target)
-          .forEach(column => better.add(`${column.key}:${metric.key}`));
-      });
-    });
-    qualityTableBody.innerHTML = data.columns.map((column, index) => {
-      const rowClass = column.waveRt ? ' class="wave-col"' : '';
-      const startsGroup = index === 0 || data.columns[index - 1].model !== column.model;
-      const modelCell = startsGroup
-        ? `<td class="quality-model-group" rowspan="${grouped[column.model].length}"><b class="quality-metric">${column.model}</b></td>`
-        : '';
-      const cells = data.metrics.map(metric => {
-        const value = metric.values[column.key];
-        const formatted = Number.isFinite(value) ? value.toFixed(metric.precision) : '—';
-        const classes = ['quality-cell'];
-        if (metric.className) classes.push(metric.className);
-        if (better.has(`${column.key}:${metric.key}`)) classes.push('best');
-        if (!Number.isFinite(value)) classes.push('na');
-        return `<td${rowClass}><div class="${classes.join(' ')}">${formatted}</div></td>`;
-      }).join('');
-      return `<tr${startsGroup && index > 0 ? ' class="quality-group-start"' : ''}>${modelCell}<td${rowClass}><b class="quality-runtime">${column.runtime}</b></td>${cells}</tr>`;
-    }).join('');
-  }
-
-  fetch('static/data/hiar_quality_summary.json')
-    .then(response => {
-      if (!response.ok) throw new Error(`Quality data returned ${response.status}`);
-      return response.json();
-    })
-    .then(renderQualitySummary)
-    .catch(error => {
-      qualityTableBody.innerHTML = '<tr><td colspan="10" class="benchmark-load-error">Quality summary could not be loaded.</td></tr>';
-      console.error(error);
-    });
-
-  const citationModal = $('#citationModal');
-  const citationText = $('#blogCitation');
-  const citationCopy = $('#copyCitation');
-  const citationStatus = $('#citationCopyStatus');
-  let citationReturnFocus = null;
-
-  function openCitation() {
-    citationReturnFocus = document.activeElement;
-    citationModal.hidden = false;
-    document.body.classList.add('cite-open');
-    citationModal.querySelector('.citation-close').focus();
-  }
-
-  function closeCitation() {
-    citationModal.hidden = true;
-    document.body.classList.remove('cite-open');
-    citationStatus.textContent = '';
-    if (citationReturnFocus) citationReturnFocus.focus();
-  }
-
-  document.querySelectorAll('[data-cite-open]').forEach(button => button.addEventListener('click', openCitation));
-  citationModal.querySelectorAll('[data-cite-close]').forEach(element => element.addEventListener('click', closeCitation));
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !citationModal.hidden) closeCitation();
-  });
-
-  citationCopy.addEventListener('click', async () => {
-    const bibtex = citationText.textContent.trim();
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(bibtex);
-      } else {
-        const helper = document.createElement('textarea');
-        helper.value = bibtex;
-        helper.setAttribute('readonly', '');
-        helper.style.position = 'fixed';
-        helper.style.opacity = '0';
-        document.body.appendChild(helper);
-        helper.select();
-        document.execCommand('copy');
-        helper.remove();
-      }
-      citationCopy.textContent = 'Copied';
-      citationStatus.textContent = 'BibTeX copied to clipboard.';
-      window.setTimeout(() => { citationCopy.textContent = 'Copy BibTeX'; }, 1600);
-    } catch (error) {
-      citationStatus.textContent = 'Copy failed — select the BibTeX above.';
-      console.error(error);
-    }
-  });
-
-  const heroWave = $('#heroWave');
-  for (let index = 0; index < 15; index += 1) {
-    const particle = document.createElement('i');
-    particle.style.left = `${(index % 5) * 9}%`;
-    particle.style.animationDelay = `${index * -0.31}s`;
-    particle.style.animationDuration = `${4.2 + (index % 4) * 0.35}s`;
-    heroWave.appendChild(particle);
-  }
-
-  const revealObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('visible');
-        if (entry.target.classList.contains('result-layout')) {
-          $('.bar-chart').classList.add('animate');
-          animateCount($('.count-up'));
-        }
-        revealObserver.unobserve(entry.target);
-      }
-    });
-  }, { threshold: 0.14 });
-  document.querySelectorAll('.reveal').forEach(element => revealObserver.observe(element));
-
-  function animateCount(element) {
-    if (!element || element.dataset.done) return;
-    element.dataset.done = 'true';
-    const target = Number(element.dataset.target);
-    const start = performance.now();
-    const duration = 1200;
-    const update = now => {
-      const progress = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      element.textContent = (target * eased).toFixed(1);
-      if (progress < 1) requestAnimationFrame(update);
-    };
-    requestAnimationFrame(update);
-  }
-
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    setPlaying(false);
-    schedulePlaying = false;
-    schedulePosition = 0.72;
-    tick = 10;
+  /* ---------- reveal on scroll ---------- */
+  var reveals = $$(".reveal");
+  if (reduceMotion || !("IntersectionObserver" in window)) {
+    reveals.forEach(function (el) { el.classList.add("in"); });
   } else {
-    setPlaying(true);
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -8% 0px" });
+    reveals.forEach(function (el) { io.observe(el); });
   }
-  render();
+
+  /* ---------- guide blink ---------- */
+  $$("[data-blink]").forEach(function (fig) {
+    if (reduceMotion) return;
+    (function schedule() {
+      setTimeout(function () {
+        fig.classList.add("is-blinking");
+        setTimeout(function () { fig.classList.remove("is-blinking"); schedule(); }, 150);
+      }, 2600 + Math.random() * 3400);
+    })();
+  });
+
+  /* ---------- promo video: show a placeholder until the file exists ---------- */
+  var promoFrame = $("#promoFrame");
+  var promo = $("#promoVideo");
+  if (promoFrame && promo) {
+    var markMissing = function () { promoFrame.classList.add("is-missing"); };
+    promo.addEventListener("error", markMissing);
+    var source = promo.querySelector("source");
+    if (source) source.addEventListener("error", markMissing);
+    // networkState is briefly NO_SOURCE while the element starts loading, so only trust it later
+    promo.addEventListener("loadedmetadata", function () { promoFrame.classList.remove("is-missing"); });
+    if (promo.error) markMissing();
+    setTimeout(function () { if (promo.error || (promo.networkState === 3 && promo.readyState === 0)) markMissing(); }, 1500);
+  }
+
+  /* ---------- wavefront explorer (S = 4, 8 chunks) ---------- */
+  var S = 4, CHUNKS = 8, K_MAX = CHUNKS - 1 + S;
+  var grid = $("#wfGrid");
+  if (grid) {
+    var out = $("#wfOut"), mask = $("#wfMask");
+    var kLabel = $("#wfK"), activeLabel = $("#wfActive"), doneLabel = $("#wfDone");
+    var playBtn = $("#wfPlay");
+    var cells = [], chips = [], maskRows = [];
+    var k = 0, timer = null;
+
+    grid.style.setProperty("--cols", CHUNKS);
+    out.style.setProperty("--cols", CHUNKS);
+    var html = '<span class="lab"></span>';
+    for (var i = 0; i < CHUNKS; i++) html += '<span class="lab colh">c' + i + "</span>";
+    for (var s = 0; s <= S; s++) {
+      html += '<span class="lab">' + (s < S ? "step " + (s + 1) : "store") + "</span>";
+      for (i = 0; i < CHUNKS; i++) {
+        html += '<span class="wf-cell' + (s === S ? " store" : "") + '" data-i="' + i + '" data-s="' + s + '" data-k="' + i + "+" + s + '"></span>';
+      }
+    }
+    grid.innerHTML = html;
+    cells = $$(".wf-cell", grid);
+
+    var outHtml = '<span class="lab">out</span>';
+    for (i = 0; i < CHUNKS; i++) outHtml += '<span class="out-chip"></span>';
+    out.innerHTML = outHtml;
+    chips = $$(".out-chip", out);
+
+    var maskHtml = '<span class="h"></span>';
+    for (var j = 0; j < S; j++) maskHtml += '<span class="h">j' + j + "</span>";
+    for (s = 0; s < S; s++) {
+      maskHtml += '<span class="h" data-row="' + s + '">s' + s + "</span>";
+      for (j = 0; j < S; j++) {
+        maskHtml += '<span class="m' + (j === s ? " self" : j > s ? " on" : "") + '" title="slot ' + s + (j >= s ? " reads " : " does not read ") + "slot " + j + '"></span>';
+      }
+    }
+    mask.innerHTML = maskHtml;
+    maskRows = $$("[data-row]", mask);
+
+    var render = function () {
+      var active = 0;
+      cells.forEach(function (c) {
+        var ci = +c.dataset.i, cs = +c.dataset.s, ck = ci + cs;
+        c.classList.toggle("active", ck === k);
+        c.classList.toggle("done", ck < k);
+        c.classList.toggle("next", ck === k + 1);
+        if (ck === k) active++;
+      });
+      var emitted = 0;
+      chips.forEach(function (chip, ci) {
+        var on = k > ci + S - 1;
+        chip.classList.toggle("on", on);
+        if (on) emitted++;
+      });
+      maskRows.forEach(function (row, rs) {
+        var ci = k - rs;
+        row.title = "query slot s" + rs + (ci >= 0 && ci < CHUNKS ? ", chunk c" + ci : ", idle");
+      });
+      kLabel.textContent = "k = " + k;
+      activeLabel.textContent = active + " / " + (S + 1);
+      doneLabel.textContent = emitted + " / " + CHUNKS;
+    };
+
+    var stop = function () {
+      if (timer) clearInterval(timer);
+      timer = null;
+      playBtn.textContent = "Play";
+      playBtn.setAttribute("aria-pressed", "false");
+    };
+    var play = function () {
+      if (timer) return;
+      if (k >= K_MAX) { k = 0; render(); }
+      playBtn.textContent = "Pause";
+      playBtn.setAttribute("aria-pressed", "true");
+      timer = setInterval(function () {
+        if (k >= K_MAX) { stop(); return; }
+        k++;
+        render();
+      }, 900);
+    };
+    playBtn.addEventListener("click", function () { timer ? stop() : play(); });
+    $("#wfNext").addEventListener("click", function () { stop(); k = Math.min(K_MAX, k + 1); render(); });
+    $("#wfPrev").addEventListener("click", function () { stop(); k = Math.max(0, k - 1); render(); });
+    $("#wfReset").addEventListener("click", function () { stop(); k = 0; render(); });
+
+    if (reduceMotion || !("IntersectionObserver" in window)) {
+      k = 6;
+      render();
+    } else {
+      render();
+      var started = false;
+      new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting && !started) { started = true; play(); }
+        });
+      }, { threshold: 0.45 }).observe($("#explorer"));
+    }
+  }
+
+  /* ---------- WP vs CP chart (paper Table: DiT-only throughput) ---------- */
+  // [scale, backend, ulysses, ring, wp, ratio, dagger flags {u, w, r}]
+  var CP = [
+    ["1.3B", "BF16", 80.60, 41.19, 150.09, 1.862, "wr"],
+    ["1.3B", "Sage", 84.01, 56.99, 151.15, 1.799, ""],
+    ["1.3B", "Sage+W8A8", 61.17, 45.96, 154.75, 2.530, ""],
+    ["3B", "BF16", 75.38, 38.20, 88.86, 1.179, ""],
+    ["3B", "Sage", 75.93, 37.00, 89.26, 1.176, ""],
+    ["3B", "Sage+W8A8", 56.15, 36.04, 95.31, 1.697, ""],
+    ["5B", "BF16", 58.40, 41.42, 68.33, 1.170, ""],
+    ["5B", "Sage", 63.13, 30.37, 67.00, 1.061, ""],
+    ["5B", "Sage+W8A8", 60.71, 31.17, 75.44, 1.243, ""],
+    ["7B", "BF16", 49.89, 38.96, 53.28, 1.068, ""],
+    ["7B", "Sage", 52.70, 25.75, 53.50, 1.015, "uwr"],
+    ["7B", "Sage+W8A8", 56.12, 26.56, 61.55, 1.097, ""],
+    ["9B", "BF16", 46.41, 38.94, 45.70, 0.985, "uwr"],
+    ["9B", "Sage", 45.26, 22.73, 45.59, 1.007, ""],
+    ["9B", "Sage+W8A8", 52.51, 24.16, 53.84, 1.025, ""],
+    ["14B", "BF16", 26.72, 23.90, 28.71, 1.075, ""],
+    ["14B", "Sage", 27.90, 16.32, 28.72, 1.029, ""],
+    ["14B", "Sage+W8A8", 30.98, 17.16, 33.60, 1.085, ""]
+  ];
+  var chart = $("#cpChart");
+  if (chart) {
+    var viz = $("#cpViz"), tip = $("#cpTip"), sub = $("#cpSub");
+    var backend = "Sage+W8A8";
+    var SERIES = [
+      { key: "wp", name: "WP (ours)", idx: 4, flag: "w", color: "var(--series-wp)" },
+      { key: "uly", name: "Ulysses CP", idx: 2, flag: "u", color: "var(--series-uly)" },
+      { key: "ring", name: "Ring CP", idx: 3, flag: "", color: "var(--series-ring)" }
+    ];
+    var fmt = function (v) { return v.toFixed(2); };
+    var dag = function (row, flag) { return flag && row[6].indexOf(flag) >= 0 ? "†" : ""; };
+    var NS = "http://www.w3.org/2000/svg";
+    var el = function (name, attrs, text) {
+      var n = document.createElementNS(NS, name);
+      for (var a in attrs) n.setAttribute(a, attrs[a]);
+      if (text != null) n.textContent = text;
+      return n;
+    };
+    // square pixel bars on whole-pixel edges
+    var barPath = function (x0, y, w, h) { return "M" + x0 + "," + y + "H" + (x0 + w) + "V" + (y + h) + "H" + x0 + "Z"; };
+    var ctx = document.createElement("canvas").getContext("2d");
+    var tw = function (s) {
+      ctx.font = '12px "WF Pixel", "IBM Plex Mono", monospace';
+      return ctx.measureText(s).width;
+    };
+
+    var draw = function () {
+      var rows = CP.filter(function (r) { return r[1] === backend; });
+      var W = Math.max(280, chart.clientWidth);
+      var narrow = W < 520;
+      var labelW = narrow ? 40 : 56, rightW = narrow ? 92 : 120, top = 8, axisH = 26;
+      var barH = narrow ? 12 : 14, barGap = 2, groupGap = narrow ? 16 : 20;
+      var groupH = SERIES.length * barH + (SERIES.length - 1) * barGap;
+      var H = top + rows.length * (groupH + groupGap) - groupGap + axisH;
+      var plotW = W - labelW - rightW, xMax = 160;
+      var x = function (v) { return labelW + Math.round((v / xMax) * plotW); };
+
+      chart.innerHTML = "";
+      var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H });
+      [0, 40, 80, 120, 160].forEach(function (t) {
+        svg.appendChild(el("rect", { x: x(t) - (t === 0 ? 2 : 0), y: top - 4, width: t === 0 ? 2 : 1, height: H - axisH - top + 8, fill: t === 0 ? "var(--axis)" : "var(--grid)" }));
+        // the pixel face is crisp only on whole pixels, so centre by measured width instead of text-anchor
+        svg.appendChild(el("text", { x: Math.round(x(t) - tw(String(t)) / 2), y: H - 6, "font-size": 12, fill: "var(--text-3)" }, String(t)));
+      });
+
+      rows.forEach(function (row, gi) {
+        var gy = top + gi * (groupH + groupGap);
+        var g = el("g", { "data-gi": gi });
+        g.appendChild(el("text", { x: 0, y: gy + Math.floor((groupH + 9) / 2), "font-size": 12, fill: "var(--ink)" }, row[0]));
+        SERIES.forEach(function (sr, si) {
+          var y = gy + si * (barH + barGap);
+          var w = x(row[sr.idx]) - labelW;
+          g.appendChild(el("path", { d: barPath(labelW, y, w, barH), fill: sr.color, "data-si": si }));
+          if (sr.key === "wp") {
+            var label = fmt(row[4]) + dag(row, "w") + " · " + row[5].toFixed(narrow ? 2 : 3) + "×" + dag(row, "r");
+            g.appendChild(el("text", { x: x(row[4]) + 6, y: y + Math.floor((barH + 9) / 2), "font-size": 12, fill: "var(--ink)" }, label));
+          }
+        });
+        // hit target: the whole band, larger than the marks
+        var hit = el("rect", { x: 0, y: gy - groupGap / 2, width: W, height: groupH + groupGap, fill: "transparent", "data-gi": gi });
+        g.appendChild(hit);
+        svg.appendChild(g);
+      });
+      chart.appendChild(svg);
+
+      var show = function (gi, evt) {
+        var row = rows[gi];
+        var html = '<span class="tt">' + row[0] + " · " + row[1] + " · " + (row[0] === "14B" ? "4 steps / 5 GPUs" : "5 steps / 6 GPUs") + "</span>";
+        SERIES.forEach(function (sr) {
+          html += '<div class="row' + (sr.key === "wp" ? " hl" : "") + '"><span><i style="background:' + sr.color + '"></i>' + sr.name + "</span><span>" + fmt(row[sr.idx]) + dag(row, sr.flag) + "</span></div>";
+        });
+        html += '<div class="row"><span>WP / faster CP</span><span>' + row[5].toFixed(3) + "×" + dag(row, "r") + "</span></div>";
+        tip.innerHTML = html;
+        var box = viz.getBoundingClientRect();
+        var px = evt.clientX - box.left + 14, py = evt.clientY - box.top + 14;
+        var tw = tip.offsetWidth || 190;
+        if (px + tw > box.width - 8) px = Math.max(8, evt.clientX - box.left - tw - 14);
+        tip.style.left = px + "px";
+        tip.style.top = py + "px";
+        tip.classList.add("show");
+      };
+      $$("rect[data-gi]", svg).forEach(function (r) {
+        r.addEventListener("mousemove", function (e) { show(+r.dataset.gi, e); });
+        r.addEventListener("mouseleave", function () { tip.classList.remove("show"); });
+      });
+    };
+
+    var tbody = $("#cpTbody");
+    tbody.innerHTML = CP.map(function (r, n) {
+      var wpBest = r[4] >= r[2];
+      var cell = function (v, best, d) { return best ? '<td class="best"><span>' + fmt(v) + d + "</span></td>" : "<td>" + fmt(v) + d + "</td>"; };
+      var steps = r[0] === "14B" ? "4" : "5", gpus = r[0] === "14B" ? "5" : "6";
+      return '<tr' + (n % 3 === 0 && n ? ' class="sep"' : "") + "><td>" + r[0] + '</td><td class="l">' + r[1] + "</td><td>" + steps + "</td><td>" + gpus + "</td>" +
+        cell(r[2], !wpBest, dag(r, "u")) + "<td>" + fmt(r[3]) + "</td>" + cell(r[4], wpBest, dag(r, "w")) +
+        (r[5] < 1 ? '<td class="issue"><span>' : "<td>") + r[5].toFixed(3) + "×" + dag(r, "r") + (r[5] < 1 ? "</span></td>" : "</td>") + "</tr>";
+    }).join("");
+
+    $$(".seg button[data-backend]", viz).forEach(function (b) {
+      b.addEventListener("click", function () {
+        backend = b.dataset.backend;
+        $$(".seg button[data-backend]", viz).forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+        sub.textContent = backend + " · higher is better";
+        draw();
+      });
+    });
+    var toggle = $("#cpToggle"), table = $("#cpTable");
+    toggle.addEventListener("click", function () {
+      var open = table.hasAttribute("hidden");
+      if (open) table.removeAttribute("hidden"); else table.setAttribute("hidden", "");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = open ? "Hide table" : "Show table";
+    });
+    var lastW = 0;
+    window.addEventListener("resize", function () {
+      if (chart.clientWidth !== lastW) { lastW = chart.clientWidth; draw(); }
+    });
+    draw();
+    lastW = chart.clientWidth;
+    if (document.fonts && document.fonts.load) document.fonts.load('12px "WF Pixel"').then(draw, function () {});
+  }
+
+  /* ---------- sample gallery ---------- */
+  $$(".gallery-head .seg button[data-set]").forEach(function (b, _, all) {
+    b.addEventListener("click", function () {
+      all.forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+      $$("[data-gallery]").forEach(function (g) {
+        var on = g.dataset.gallery === b.dataset.set;
+        if (on) g.removeAttribute("hidden"); else g.setAttribute("hidden", "");
+        if (!on) $$("video", g).forEach(function (v) { v.pause(); v.parentNode.classList.remove("playing"); });
+      });
+    });
+  });
+  $$(".clip").forEach(function (clip) {
+    var v = $("video", clip);
+    clip.addEventListener("click", function () {
+      if (v.paused) {
+        v.play().then(function () { clip.classList.add("playing"); }).catch(function () {});
+      } else {
+        v.pause();
+        clip.classList.remove("playing");
+      }
+    });
+  });
+
+  /* ---------- BibTeX copy ---------- */
+  var copyBtn = $("#copyBib");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", function () {
+      var text = $("#bibText").textContent;
+      var done = function () {
+        copyBtn.textContent = "Copied";
+        setTimeout(function () { copyBtn.textContent = "Copy"; }, 1600);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done);
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  }
 })();

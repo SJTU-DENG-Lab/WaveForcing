@@ -1,11 +1,11 @@
 <div align="center">
-  <img src="page/static/images/wf_v1.svg" width="128" alt="Wave Forcing logo">
+  <img src="page/static/images/wf_v2.svg" width="132" alt="Wave Forcing logo">
   <h1>Wave Forcing</h1>
   <h3>Towards Speed-of-Light Streaming Video Generation</h3>
 
   <a href="https://sjtu-deng-lab.github.io/WaveForcing/"><img src="https://img.shields.io/badge/Project-Page-20C7C7" alt="Project Page"></a>
   <a href="https://github.com/SJTU-DENG-Lab/WaveForcing"><img src="https://img.shields.io/badge/GitHub-Code-111827?logo=github" alt="GitHub Code"></a>
-  <a href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview"><img src="https://img.shields.io/badge/%F0%9F%A4%97-Preview_Checkpoint-FFD21E" alt="Hugging Face Preview Checkpoint"></a>
+  <a href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-1.3B"><img src="https://img.shields.io/badge/%F0%9F%A4%97-WaveForcing--1.3B-FFD21E" alt="Hugging Face WaveForcing-1.3B"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-6B5BFF" alt="Apache 2.0 License"></a>
 </div>
 
@@ -25,25 +25,27 @@ The inference/runtime code in this repository is now open source.
 |---|---|
 | Inference code and WaveRT | ✅ Available in this repository |
 | Interactive project page and full configuration matrix | ✅ [Available here](https://sjtu-deng-lab.github.io/WaveForcing/) |
-| WaveForcing-T2V-1.3B-5step | ✅ [Preview checkpoint on Hugging Face](https://huggingface.co/SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview) |
+| WaveForcing-1.3B, 5-step | ✅ [`5step/` on Hugging Face](https://huggingface.co/SJTU-DENG-Lab/WaveForcing-1.3B) |
+| WaveForcing-1.3B, 4-step | ✅ [`4step/` on Hugging Face](https://huggingface.co/SJTU-DENG-Lab/WaveForcing-1.3B) |
 | Additional checkpoints | ⏳ More checkpoints coming soon |
 | Reference training code | [S1/S2/S3 source and recipes](training/README.md) |
 | Paper / arXiv | ⏳ Coming soon |
 
 > [!NOTE]
-> The Hugging Face repository currently contains the **only public checkpoint**:
-> a preview 1.3B model trained for five denoising steps. The 4-step and larger
-> checkpoints used in parts of the system study are not public yet.
+> Both public checkpoints live in one repository,
+> [SJTU-DENG-Lab/WaveForcing-1.3B](https://huggingface.co/SJTU-DENG-Lab/WaveForcing-1.3B):
+> `5step/` and `4step/`, each a native Wan `model.safetensors` (BF16, EMA weights).
+> A mirror is on [ModelScope](https://modelscope.cn/models/Osc7YuxuanLiu/WaveForcing-1.3B).
 
-## Quick start: 1.3B 5-step Preview
+## Quick start: WaveForcing-1.3B
 
-The example below uses the released checkpoint with an eight-GPU **5+2**
+The example below uses the 5-step checkpoint with an eight-GPU **5+2**
 pipeline: five denoising stages, one clean-KV store rank, and two streaming VAE
 stages. The runtime is currently validated with Python 3.12, PyTorch
 2.11.0+cu128, the SGLang diffusion runtime, and Hopper GPUs. See
 [`pyproject.toml`](pyproject.toml) for the pinned Python stack.
 
-### 1. Download the base model and Preview checkpoint
+### 1. Download the base model and WaveForcing-1.3B
 
 ```bash
 python -m pip install -U "huggingface_hub[cli]"
@@ -51,11 +53,11 @@ python -m pip install -U "huggingface_hub[cli]"
 hf download Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
   --local-dir ckpts/Wan2.1-T2V-1.3B-Diffusers
 
-hf download SJTU-DENG-Lab/WaveForcing-T2V-1.3B-5step-Preview \
-  --local-dir ckpts/WaveForcing-T2V-1.3B-5step-Preview
+hf download SJTU-DENG-Lab/WaveForcing-1.3B \
+  --local-dir ckpts/WaveForcing-1.3B
 ```
 
-The Preview repository supplies the distilled DiT weights. Text encoder,
+WaveForcing-1.3B supplies the distilled DiT weights. Text encoder,
 tokenizer, VAE, and scheduler components are loaded from the Wan2.1 base model.
 
 ### 2. Launch WaveRT
@@ -63,7 +65,7 @@ tokenizer, VAE, and scheduler components are loaded from the Wan2.1 base model.
 ```bash
 python -m wave_rt \
   --model-path ckpts/Wan2.1-T2V-1.3B-Diffusers \
-  --gen-ckpt ckpts/WaveForcing-T2V-1.3B-5step-Preview/model.safetensors \
+  --gen-ckpt ckpts/WaveForcing-1.3B/5step/model.safetensors \
   --rf-step 5 \
   --wp-size 6 \
   --denoising-step-list 1000,800,600,400,200 \
@@ -77,20 +79,28 @@ python -m wave_rt \
   --attention-backend torch_sdpa \
   --cuda-visible-devices 0,1,2,3,4,5,6,7 \
   --prompt "A cinematic shot of a fluffy corgi running on a sunny beach, waves in the background." \
-  --task preview \
+  --task quickstart \
   --run-tag corgi
 ```
 
 The generated video and metrics are written to:
 
 ```text
-outputs/preview/corgi/video.mp4
-outputs/preview/corgi/metrics.json
+outputs/quickstart/corgi/video.mp4
+outputs/quickstart/corgi/metrics.json
 ```
 
 `--num-frames` counts latent frames and must be divisible by three. Use
 `--num-frames 399` to match the long-video benchmark protocol below; this
-produces 1596 output frames (approximately 100 seconds at 16 FPS).
+produces 1593 output frames (approximately 100 seconds at 16 FPS).
+
+### 3. Run the 4-step checkpoint
+
+Point `--gen-ckpt` at `ckpts/WaveForcing-1.3B/4step/model.safetensors` and set
+`--rf-step 4 --wp-size 5 --denoising-step-list 1000,750,500,250 --vae-stages 3`.
+This is the **4+3** layout used for the headline numbers below: four denoising
+stages, one store rank, and three streaming VAE stages on the same eight GPUs.
+The quick start above is the **5+2** layout, which the results table also lists.
 
 ## Reference training
 
@@ -101,33 +111,30 @@ PyTorch 2.11.0+cu128 environment as WaveRT, under a separate
 
 ## Current results
 
-The following numbers are measured on **8× NVIDIA H200 GPUs** with 399 latent
-frames / 1596 output frames. Steady-state numbers pool
-`per_tick_ms[12:-4]` across three repetitions and report p50. DiT FPS includes
-pipeline fill/drain; E2E FPS additionally includes the streaming VAE.
+The following numbers are measured on **8× NVIDIA H200 GPUs** at 832×480 with
+399 latent frames (1593 decoded frames). Steady-state values pool per-tick
+timings across three repetitions and report p50; DiT FPS includes pipeline
+fill/drain, and E2E FPS additionally includes the streaming VAE. Loading and
+file encoding are excluded.
 
-| Model | Topology | Runtime configuration | Steady FPS (p50) | DiT FPS | E2E FPS |
-|---|---:|---|---:|---:|---:|
-| 1.3B | 4+3 | Sage · causal · paged | 125.7 | 124.1 | **117.7** |
-| 1.3B | 4+3 | Sage + W8A8 · causal · paged | **126.5** | 121.5 | 115.9 |
-| 1.3B Preview | 5+2 | BF16 / SDPA · causal · paged | 86.5 | 84.9 | **84.2** |
-| 14B system prototype¹ | 4+3 | Sage + W8A8 · causal · paged | 28.5 | 28.1 | **28.1** |
+| Model | Steps | Topology | Runtime configuration | Steady FPS (p50) | DiT FPS | E2E FPS |
+|---|---:|---:|---|---:|---:|---:|
+| 1.3B | 4 | 4+3 | BF16/FA3 · causal · paged | 152.1 | 147.6 | **134.8** |
+| 1.3B | 4 | 4+3 | Sage · causal · paged | 153.2 | **147.8** | 134.8 |
+| 1.3B | 4 | 4+3 | Sage + W8A8 · causal · paged | **157.8** | 145.5 | 132.9 |
+| 1.3B | 5 | 5+2 | BF16/FA3 · causal · paged | 99.6 | 104.8 | 96.5 |
+| 14B system prototype¹ | 4 | 4+3 | Sage + W8A8 · causal · paged | 33.9 | 33.6 | **33.5** |
 
-The best 1.3B 4+3 run generates 1596 frames in approximately **13.56 seconds**,
-or **117.7 E2E FPS**, versus the matched 15.0 FPS single-GPU baseline
-(**7.9× speedup**). The maximum valid steady-state throughput is **126.5 FPS**.
-
-The released five-step Preview uses the 5+2 topology. Its two-stage VAE is too
-coarse to hide all decoding work: the best reliable BF16 configuration reaches
-**84.2 E2E FPS**, even though faster DiT configurations exceed 120 FPS. The full
-three-stage VAE in 4+3 follows the DiT cadence more closely and avoids this
-decoder tail.
+The best 1.3B 4+3 run decodes 1593 frames in approximately **11.8 seconds**, or
+**134.8 E2E FPS**, versus the matched 19.06 FPS single-GPU baseline
+(**7.07× speedup**). The maximum steady-state throughput is **157.8 FPS**.
 
 ¹ The 14B row uses shape-accurate random-initialized weights and measures system
-scaling only; it is not a generation-quality result.
+scaling only; it is not a generation-quality result. The 1.3B rows use the
+released 4-step and 5-step checkpoints.
 
-For every configuration, precise metric definitions, and the synchronized vs.
-overlapped comparison, see the
+For every configuration, precise metric definitions, and the exchange-mode
+ablation, see the
 [interactive results matrix](https://sjtu-deng-lab.github.io/WaveForcing/#results).
 The machine-readable summary is available at
 [`page/static/data/results_summary.json`](page/static/data/results_summary.json).
@@ -152,10 +159,12 @@ The arXiv entry is not public yet. For now, please cite the project page:
 ```bibtex
 @misc{denglab2026waveforcing,
   title        = {Wave Forcing: Towards Speed-of-Light Streaming Video Generation},
-  author       = {{DENG Lab MLSys Team}},
+  author       = {Jin, Yijie and Liu, Yuxuan and Xu, Jiajun and Huang, Ye and
+                  Wang, Chuzhi and Li, Jiayang and Chen, Ruiyang and Hong, Chenling and
+                  Wang, Xu and Deng, Zhijie},
   year         = {2026},
-  howpublished = {Project blog},
-  organization = {Shanghai Jiao Tong University},
+  howpublished = {Project page},
+  note         = {arXiv preprint forthcoming},
   url          = {https://sjtu-deng-lab.github.io/WaveForcing/}
 }
 ```
