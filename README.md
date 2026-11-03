@@ -3,6 +3,7 @@
   <h1>Wave Forcing</h1>
   <h3>Towards Speed-of-Light Streaming Video Generation</h3>
 
+  <a href="https://arxiv.org/abs/2611.00859"><img src="https://img.shields.io/badge/arXiv-2611.00859-b31b1b" alt="arXiv paper"></a>
   <a href="https://sjtu-deng-lab.github.io/WaveForcing/"><img src="https://img.shields.io/badge/Project-Page-20C7C7" alt="Project Page"></a>
   <a href="https://github.com/SJTU-DENG-Lab/WaveForcing"><img src="https://img.shields.io/badge/GitHub-Code-111827?logo=github" alt="GitHub Code"></a>
   <a href="https://huggingface.co/SJTU-DENG-Lab/WaveForcing-1.3B"><img src="https://img.shields.io/badge/%F0%9F%A4%97-WaveForcing--1.3B-FFD21E" alt="Hugging Face WaveForcing-1.3B"></a>
@@ -29,7 +30,7 @@ The inference/runtime code in this repository is now open source.
 | WaveForcing-1.3B, 4-step | ✅ [`4step/` on Hugging Face](https://huggingface.co/SJTU-DENG-Lab/WaveForcing-1.3B) |
 | Additional checkpoints | ⏳ More checkpoints coming soon |
 | Reference training code | [S1/S2/S3 source and recipes](training/README.md) |
-| Paper / arXiv | ⏳ Coming soon |
+| Paper / arXiv | ✅ [arXiv:2611.00859](https://arxiv.org/abs/2611.00859) |
 
 > [!NOTE]
 > Both public checkpoints live in one repository,
@@ -154,7 +155,7 @@ wave_rt/
 
 ## Citation
 
-The arXiv entry is not public yet. For now, please cite the project page:
+Please cite our [arXiv paper](https://arxiv.org/abs/2611.00859):
 
 ```bibtex
 @misc{denglab2026waveforcing,
@@ -163,9 +164,9 @@ The arXiv entry is not public yet. For now, please cite the project page:
                   Wang, Chuzhi and Li, Jiayang and Chen, Ruiyang and Hong, Chenling and
                   Wang, Xu and Deng, Zhijie},
   year         = {2026},
-  howpublished = {Project page},
-  note         = {arXiv preprint forthcoming},
-  url          = {https://sjtu-deng-lab.github.io/WaveForcing/}
+  eprint       = {2611.00859},
+  archivePrefix = {arXiv},
+  url          = {https://arxiv.org/abs/2611.00859}
 }
 ```
 
