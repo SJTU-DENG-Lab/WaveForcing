@@ -1,0 +1,17 @@
+# Model dependencies resolved with Reactor Runtime during `reactor build`.
+# `build.runtime_version` in reactor.yaml selects the Runtime release.
+
+# Adapter and assets.
+numpy
+PyYAML
+huggingface-hub
+
+# Released single-GPU WaveForcing inference.
+torch==2.11.0
+diffusers==0.37.0
+transformers==5.12.1
+accelerate
+safetensors
+omegaconf
+einops
+ftfy

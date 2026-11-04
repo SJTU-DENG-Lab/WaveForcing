@@ -103,6 +103,36 @@ This is the **4+3** layout used for the headline numbers below: four denoising
 stages, one store rank, and three streaming VAE stages on the same eight GPUs.
 The quick start above is the **5+2** layout, which the results table also lists.
 
+## Inference with Reactor Runtime
+
+The [Reactor integration](reactor/README.md) serves the released 4-step
+checkpoint on one GPU with continuous video, live prompt updates and a small
+browser demo. It requires Docker, NVIDIA Container Toolkit and the
+[Reactor CLI](https://docs.reactor.inc/deploy/platform/installation).
+From this repository:
+
+```sh
+cd reactor
+reactor build
+reactor run --gpus device=0 --port 8080 --shm-size 1g
+```
+
+Weights download automatically on first startup. Wait until
+`curl -s http://localhost:8080/health` reports `"state":"available"`.
+In a second terminal, with Node.js 22.12+:
+
+```sh
+cd reactor/demo
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open http://localhost:5173, set **Runtime URL** to `http://localhost:8080`,
+click **Use endpoint**, then **Connect**. Enter a prompt and press
+**Start video**; **Update prompt** guides upcoming output without resetting
+video history. See [the integration guide](reactor/README.md) for controls,
+validation and SSH/WebRTC setup.
+
 ## Reference training
 
 The [training guide](training/README.md) documents the S1/S2/S3 recipe, asset

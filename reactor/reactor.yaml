@@ -1,0 +1,27 @@
+$schema: reactor/v2
+model:
+  name: waveforcing
+  version: v0.1.0
+  description: Generate continuous silent video with WaveForcing-1.3B and live prompts.
+  resources:
+    gpu: {type: NVIDIA_B200, count: 1}
+    cpu: {request: "4", limit: "16"}
+    memory: {request: 32Gi, limit: 96Gi}
+runtime:
+  import: waveforcing:WaveForcing
+  config: waveforcing.yaml
+  weights_path: ~/.cache/reactor_registry/waveforcing
+build:
+  runtime_version: "3.11.0"
+  python_version: "3.12"
+  cuda_version: "13.0.2"
+  python_requirements: requirements.txt
+  system_packages: [git, build-essential]
+  run:
+    - git clone --filter=blob:none --no-checkout https://github.com/SJTU-DENG-Lab/WaveForcing.git /opt/waveforcing && git -C /opt/waveforcing sparse-checkout set naive_rt && git -C /opt/waveforcing checkout fde159c60173be612a447ca1062ceb98fc0bb092
+    - pip install --no-deps -e /opt/waveforcing
+    # Native T5 queries CUDA during import; load it only inside the GPU worker.
+    - python -m compileall -q /opt/waveforcing/naive_rt
+  runtime_env:
+    TOKENIZERS_PARALLELISM: "false"
+    PYTORCH_ALLOC_CONF: expandable_segments:True
