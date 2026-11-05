@@ -29,21 +29,37 @@ def save_video(video, path: str, fps: int = 16) -> str:
 
     v = video
     if isinstance(v, torch.Tensor):
-        v = v.detach().float().cpu()
+        v = v.detach().cpu()
         if v.dim() == 5:
             v = v[0]
         if v.dim() != 4:
             raise ValueError(f"expected 4D/5D video, got {tuple(v.shape)}")
         if v.shape[1] in (1, 3) and v.shape[-1] not in (1, 3):
             v = v.permute(0, 2, 3, 1)
-        if v.max() <= 1.5:
-            v = v * 255.0
-        v = v.clamp(0, 255).to(torch.uint8).numpy()
+        if v.dtype != torch.uint8:
+            v = v.float()
+            if v.max() <= 1.5:
+                v = v * 255.0
+            v = v.clamp(0, 255).to(torch.uint8)
+        v = v.numpy()
     else:
         v = np.asarray(v)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     imageio.mimsave(path, list(v), fps=fps, codec="libx264",
                     macro_block_size=None, quality=8)
+    return path
+
+
+def save_video_chunks(chunks, path, fps=16):
+    """Encode CPU uint8 B,C,T,H,W chunks with bounded encoder staging memory."""
+    import imageio
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with imageio.get_writer(path, fps=fps, codec='libx264', macro_block_size=None, quality=8) as writer:
+        for chunk in chunks:
+            if chunk.dtype != torch.uint8 or chunk.device.type != 'cpu':
+                raise ValueError('Video chunks must be CPU uint8 tensors')
+            for frame in chunk[0].permute(1, 2, 3, 0):
+                writer.append_data(frame.contiguous().numpy())
     return path
 
 
@@ -75,7 +91,7 @@ def write_metrics(out_dir: str, *, task, run_tag, method, nstep,
                   num_output_frames, num_gpus, diffusion_s, vae_s=None,
                   end_to_end_s=None, seed=0, per_tick_ms=None,
                   psnr_db=None, speedup_vs_baseline=None, extra=None) -> str:
-    pf = num_output_frames * PIXEL_PER_LATENT
+    pf = num_output_frames * PIXEL_PER_LATENT - 3
     if end_to_end_s is None:
         end_to_end_s = (diffusion_s or 0.0) + (vae_s or 0.0)
     fps_without_vae = pf / diffusion_s if diffusion_s else None
@@ -107,7 +123,7 @@ def write_metrics(out_dir: str, *, task, run_tag, method, nstep,
 def finalize_run(out_dir, *, task, run_tag, method, nstep, num_output_frames,
                  num_gpus, diffusion_ms, vae_ms, e2e_ms, latents=None,
                  video=None, ref_latents="", baseline_e2e=0.0,
-                 per_tick_ms=None, seed=0) -> float | None:
+                 per_tick_ms=None, seed=0, extra=None) -> float | None:
     os.makedirs(out_dir, exist_ok=True)
     if video is not None:
         try:
@@ -130,6 +146,6 @@ def finalize_run(out_dir, *, task, run_tag, method, nstep, num_output_frames,
         diffusion_s=(diffusion_ms / 1000.0) if diffusion_ms else None,
         vae_s=(vae_ms / 1000.0) if vae_ms else None,
         end_to_end_s=e2e_s, per_tick_ms=per_tick_ms,
-        psnr_db=psnr, speedup_vs_baseline=speedup,
+        psnr_db=psnr, speedup_vs_baseline=speedup, extra=extra,
     )
     return psnr

@@ -63,6 +63,12 @@ tokenizer, VAE, and scheduler components are loaded from the Wan2.1 base model.
 
 ### 2. Launch WaveRT
 
+WaveRT now includes the WaveParallel local-compute and KV transport
+optimizations, with explicit FlashAttention 3 support. The optimized causal path
+requires the official Hopper `flash-attn-3` package (`flash_attn_interface`) and
+Triton in the CUDA/SGLang environment. See the [runtime guide](wave_rt/README.md)
+for backend choices, the optimization inventory, and CPU/GPU validation commands.
+
 ```bash
 python -m wave_rt \
   --model-path ckpts/Wan2.1-T2V-1.3B-Diffusers \
@@ -77,7 +83,7 @@ python -m wave_rt \
   --vae-partition time \
   --kv-context causal \
   --exchange-mode paged \
-  --attention-backend torch_sdpa \
+  --attention-backend fa3 \
   --cuda-visible-devices 0,1,2,3,4,5,6,7 \
   --prompt "A cinematic shot of a fluffy corgi running on a sunny beach, waves in the background." \
   --task quickstart \

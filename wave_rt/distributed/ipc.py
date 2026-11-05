@@ -8,8 +8,8 @@ The driver API negotiates its version at cuInit and works on 12.9.
 Primitives:
   - cross-process IPC export/import of a device buffer (cuIpc*MemHandle)
   - device-side generation flag release/acquire (cuStreamWriteValue32/WaitValue32)
-  - copy-engine peer copy (cuMemcpyDtoDAsync between IPC-mapped peer pointers,
-    peer access enabled -> runs on the copy engine, 0 SM, Gate B3)
+  - generic DtoD copies into producer-context IPC mappings (including paged WP)
+  - explicit peer copies for callers that manage source/destination contexts
 
 Device pointers are plain ints (torch `tensor.data_ptr()` or the CUdeviceptr from
 cuIpcOpenMemHandle); streams are plain ints (torch `Stream.cuda_stream`).
@@ -18,7 +18,6 @@ This mirrors Gate B4's validated st.release.sys generation + ld.acquire spin,
 lifted to the stream / cuda-python level so a producer process can publish into a
 consumer process's slab with no matching recv.
 """
-
 from cuda.bindings import driver as _drv
 
 _WAIT_GEQ = int(_drv.CUstreamWaitValue_flags.CU_STREAM_WAIT_VALUE_GEQ.value)
@@ -55,15 +54,12 @@ def stream_wait_u32(stream_handle: int, addr: int, value: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# copy-engine peer copy (0 SM; 343 GB/s in Gate B3)
+# asynchronous device copies (engine selection/overlap requires a GPU trace)
 # ---------------------------------------------------------------------------
-def memcpy_dtod_async(
-    dst_ptr: int, src_ptr: int, nbytes: int, stream_handle: int
-) -> None:
-    """Device-to-device async copy via the generic DtoD path. WARNING: on peer
-    memory the driver may implement this as an SM copy kernel (stole ~14% of a
-    compute-bound matmul in the PoC). Prefer memcpy_peer_async for the real
-    copy-engine path."""
+def memcpy_dtod_async(dst_ptr: int, src_ptr: int, nbytes: int,
+                      stream_handle: int) -> None:
+    """Device-to-device async copy; both pointers are valid in the current context.
+    Hardware engine selection and overlap must be measured on the target GPUs."""
     _ck(_drv.cuMemcpyDtoDAsync(dst_ptr, src_ptr, nbytes, stream_handle))
 
 
@@ -87,17 +83,13 @@ def enable_peer_access(from_ctx, to_ctx) -> None:
         _ck(_drv.cuCtxPopCurrent())
 
 
-def memcpy_peer_async(
-    dst_ptr: int, dst_ctx, src_ptr: int, src_ctx, nbytes: int, stream_handle: int
-) -> None:
-    """cuMemcpyPeerAsync — the explicit peer copy. Runs on the copy engine
-    (0 SM, Gate B3). dst_ctx/src_ctx are CUcontext handles from primary_ctx();
+def memcpy_peer_async(dst_ptr: int, dst_ctx, src_ptr: int, src_ctx,
+                      nbytes: int, stream_handle: int) -> None:
+    """Explicit peer copy; hardware engine/overlap must be profiled on target GPUs.
+    dst_ctx/src_ctx are CUcontext handles from primary_ctx();
     dst_ptr must be valid in dst_ctx (open the IPC handle under that context)."""
-    _ck(
-        _drv.cuMemcpyPeerAsync(
-            dst_ptr, dst_ctx, src_ptr, src_ctx, nbytes, stream_handle
-        )
-    )
+    _ck(_drv.cuMemcpyPeerAsync(dst_ptr, dst_ctx, src_ptr, src_ctx,
+                               nbytes, stream_handle))
 
 
 # ---------------------------------------------------------------------------

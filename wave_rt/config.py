@@ -15,7 +15,7 @@ DEFAULT_PROMPT = (
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT_ROOT = os.path.join(_REPO_ROOT, "outputs")
 
-ATTENTION_BACKENDS = ("torch_sdpa", "fa_custom", "sa", "fa", "fa2")
+ATTENTION_BACKENDS = ("torch_sdpa", "fa3", "fa2", "sa", "fa_custom", "fa")
 KV_CONTEXTS = ("joint", "causal")
 EXCHANGE_MODES = ("sync", "overlap", "onesided", "relay", "staggered", "paged")
 CAUSAL_EXCHANGE_MODES = frozenset(EXCHANGE_MODES[1:])
@@ -24,6 +24,11 @@ VAE_PARTITIONS = ("time", "flops")
 
 @dataclass
 class WaveConfig:
+    # Synthetic/DiT-only profiling does not introduce other parallel modes.
+    dummy_weights: bool = False
+    weight_seed: int = 2026
+    dummy_dims: dict | None = None
+    dit_only: bool = False
     # Wavefront topology: one denoise rank per DMD step plus one KV store rank.
     rf_step: int = 4
     wp_size: int = 5
@@ -39,7 +44,7 @@ class WaveConfig:
     model_path: str = DEFAULT_MODEL_PATH
     gen_ckpt: str = DEFAULT_GEN_CKPT
     pipeline_class_name: str = "WanRollingForcingPipeline"
-    attention_backend: str = "torch_sdpa"
+    attention_backend: str = "fa3"
     # Post-load DiT linear quantization. None keeps bf16 weights.
     quantization: str | None = None
     # Optional random-weight DiT used only for system scaling measurements.
@@ -64,6 +69,7 @@ class WaveConfig:
     serve_host: str = "127.0.0.1"
     serve_port: int = 8890
     warmup_frames: int = 24
+    full_warmup_runs: int = 0  # complete resident requests before one-shot measurement
 
     out_root: str = DEFAULT_OUT_ROOT
     task: str = "wave_rt_phase1"
@@ -76,6 +82,25 @@ class WaveConfig:
     compile: bool = False
 
     def __post_init__(self) -> None:
+        if self.full_warmup_runs < 0:
+            raise ValueError("Full warmup runs must be nonnegative")
+        # Historical aliases imported flash_attn (FA2), never FA3.
+        if self.attention_backend in ("fa_custom", "fa"):
+            self.attention_backend = "fa2"
+        if self.attention_backend not in ATTENTION_BACKENDS:
+            raise ValueError("Unknown attention backend")
+        if self.kv_context not in KV_CONTEXTS or self.exchange_mode not in EXCHANGE_MODES:
+            raise ValueError("Unknown KV context or exchange mode")
+        if self.num_frames_per_block != 3 or self.num_frames < 3 or self.warmup_frames < 3 or self.warmup_frames % 3:
+            raise ValueError("WaveRT requires positive three-frame chunks and warmup frames")
+        if min(self.height, self.width) < 16 or self.height % 16 or self.width % 16:
+            raise ValueError("Height and width must be positive multiples of 16")
+        if self.vae_stages < 0 or self.rf_step < 1:
+            raise ValueError("Invalid VAE stage or denoising step count")
+        if self.kv_transport_dtype not in ("bf16", "fp8"):
+            raise ValueError("Unknown KV transport dtype")
+        if self.kv_transport_dtype == "fp8" and self.exchange_mode != "onesided":
+            raise ValueError("FP8 KV transport requires onesided exchange")
         if self.rf_step + 1 != self.wp_size:
             raise ValueError(
                 f"WaveRT requires rf_step + 1 == wp_size, got "
@@ -104,6 +129,15 @@ class WaveConfig:
             raise ValueError(
                 f"--stagger-lead must be >= 1 (got {self.stagger_lead})"
             )
+
+    @property
+    def uses_optimized_wan(self) -> bool:
+        return self.kv_context == "causal" and self.exchange_mode in (
+            "sync", "overlap", "onesided", "staggered", "paged")
+
+    @property
+    def uses_paged_wan(self) -> bool:
+        return self.kv_context == "causal" and self.exchange_mode == "paged"
 
     @property
     def num_blocks(self) -> int:
@@ -152,12 +186,17 @@ class WaveConfig:
         g.add_argument("--warmup-frames", type=int, default=WaveConfig.warmup_frames,
                        help="serve startup warmup: latent frames for the one-time dummy "
                             "full-window generation (divisible by 3; ~24 reaches steady state)")
+        g.add_argument("--full-warmup-runs", type=int, default=0,
+                       help="complete resident DiT+VAE requests before one-shot measurement")
         g.add_argument("--height", type=int, default=WaveConfig.height)
         g.add_argument("--width", type=int, default=WaveConfig.width)
         g.add_argument("--seed", type=int, default=WaveConfig.seed)
         g.add_argument("--prompt", type=str, default=WaveConfig.prompt)
         g.add_argument("--model-path", type=str, default=WaveConfig.model_path)
         g.add_argument("--gen-ckpt", type=str, default=WaveConfig.gen_ckpt)
+        g.add_argument("--dummy-weights", action="store_true",
+                       help="random DiT weights for throughput only; skip generator checkpoint")
+        g.add_argument("--weight-seed", type=int, default=WaveConfig.weight_seed)
         g.add_argument("--attention-backend", type=str,
                        default=WaveConfig.attention_backend,
                        choices=ATTENTION_BACKENDS)
@@ -175,6 +214,9 @@ class WaveConfig:
                        help="KV transport strategy; non-sync modes require causal context")
         g.add_argument("--stagger-lead", type=int, default=WaveConfig.stagger_lead,
                        help="layers of acquire prefetch for staggered exchange")
+        g.add_argument("--kv-transport-dtype", choices=("bf16", "fp8"),
+                       default=WaveConfig.kv_transport_dtype,
+                       help="one-sided KV payload precision; fp8 is experimental")
         g.add_argument("--master-port", type=int, default=WaveConfig.master_port)
         g.add_argument("--cuda-visible-devices", type=str, default=None)
         g.add_argument("--out-root", type=str, default=WaveConfig.out_root)
@@ -204,18 +246,22 @@ class WaveConfig:
             serve_host=ns.serve_host,
             serve_port=ns.serve_port,
             warmup_frames=ns.warmup_frames,
+            full_warmup_runs=ns.full_warmup_runs,
             height=ns.height,
             width=ns.width,
             seed=ns.seed,
             prompt=ns.prompt,
             model_path=ns.model_path,
             gen_ckpt=ns.gen_ckpt,
+            dummy_weights=ns.dummy_weights,
+            weight_seed=ns.weight_seed,
             attention_backend=ns.attention_backend,
             quantization=ns.quantization,
             dit_scale=ns.dit_scale,
             kv_context=ns.kv_context,
             exchange_mode=ns.exchange_mode,
             stagger_lead=ns.stagger_lead,
+            kv_transport_dtype=ns.kv_transport_dtype,
             master_port=ns.master_port,
             cuda_visible_devices=ns.cuda_visible_devices,
             out_root=ns.out_root,
