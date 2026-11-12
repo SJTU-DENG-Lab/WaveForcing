@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WaveRT Interactive</title>
+<style>
+*{box-sizing:border-box}
+body{font:15px/1.45 system-ui,sans-serif;background:#11151b;color:#e7edf4;margin:0;padding:16px 20px 40px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;max-width:1440px;margin:0 auto 14px}
+h1{font-size:22px;margin:0;font-weight:650}
+h2{font-size:15px;margin:0 0 10px;font-weight:650}
+label{display:block;font-weight:600;margin-bottom:8px;font-size:13px;color:#c5d3e0}
+.workspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.9fr);gap:16px;align-items:start;max-width:1440px;margin:0 auto}
+.stage,.panel section,#gpu-monitor{background:#19212c;border:1px solid #303e50;border-radius:12px}
+.stage{padding:12px;position:sticky;top:12px}
+video{display:block;width:100%;aspect-ratio:832/480;background:#06090d;border-radius:10px}
+.stage-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+#status{color:#b8c8d9;min-height:1.4em;margin:0;flex:1 1 220px;font-size:13px}
+.panel{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel section{padding:14px 16px}
+textarea{width:100%;min-height:72px;padding:10px 12px;background:#101720;color:inherit;border:1px solid #536172;border-radius:8px;font:inherit;resize:vertical}
+#prompt{min-height:110px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+button{padding:9px 14px;border:1px solid #60768e;border-radius:7px;background:#294461;color:inherit;font:inherit;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:#236caa;border-color:#458cc5}
+.hint,small,#trace-status{color:#9aabba;font-size:12px}
+.hint{margin:8px 0 0}
+#history-list{list-style:none;margin:0;padding:0;max-height:min(42vh,420px);overflow:auto;display:flex;flex-direction:column;gap:8px}
+#history-list:empty::before{content:'开始生成后，提示词会按时间列在这里。';color:#7f91a3;font-size:13px}
+#history-list li{padding:10px 12px;background:#101720;border-radius:8px;border-left:3px solid #458cc5}
+#history-list li.switch{border-left-color:#7cbc4f}
+#history-list li.pending{border-left-color:#d2a54a;opacity:.9}
+#history-list .meta{display:flex;flex-wrap:wrap;gap:8px 12px;color:#9aabba;font-size:12px;font-variant-numeric:tabular-nums;margin-bottom:6px}
+#history-list .text{white-space:pre-wrap;word-break:break-word;font-size:13px}
+#current-prompt{margin:0 0 10px;padding:8px 10px;background:#101720;border-radius:8px;font-size:13px;color:#c5d3e0;white-space:pre-wrap;word-break:break-word;min-height:1.4em}
+#current-prompt:empty::before{content:'尚未开始';color:#7f91a3}
+#gpu-monitor{max-width:1440px;margin:16px auto 0;padding:14px 16px}
+#memory-summary{font-size:20px;margin:6px 0 12px}
+#gpu-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.gpu{padding:10px;background:#101720;border-radius:8px}
+.gpu b{font-size:13px}.gpu .memory{margin:6px 0;font-variant-numeric:tabular-nums;font-size:13px}
+.gpu small{font-size:11px}.gpu progress{width:100%;height:7px;accent-color:#4c9dde;display:block;margin-bottom:6px}
+.monitor-heading{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+#trace-status{max-width:1440px;margin:10px auto 0}
+@media(max-width:960px){
+ .workspace{grid-template-columns:1fr}
+ .stage{position:static}
+ #gpu-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+</style>
+<header><h1>WaveRT Interactive</h1><small id="trace-status">诊断日志正在连接…</small></header>
+<main class="workspace">
+ <div class="stage">
+  <video id="screen" muted playsinline disablepictureinpicture></video>
+  <div class="stage-bar"><p id="status" role="status">正在连接…</p><button id="pause" disabled>暂停播放</button></div>
+ </div>
+ <aside class="panel">
+  <section id="initial-controls">
+   <label for="initial-prompt">初始 / 重新生成</label>
+   <textarea id="initial-prompt" placeholder="描述第一幕的主体、场景和动作，例如：一艘红色帆船在平静的湖面上缓缓前行，远处是雪山。"></textarea>
+   <div class="actions"><button id="start" class="primary" disabled>开始生成</button></div>
+   <p class="hint">重新生成会从头开始并换新种子；模型保持加载。</p>
+  </section>
+  <section id="next-controls">
+   <label>当前生效</label>
+   <div id="current-prompt"></div>
+   <label for="prompt">接下来希望看到什么</label>
+   <textarea id="prompt" placeholder="在当前画面上继续改：主体、镜头或动作。Ctrl/⌘+Enter 提交。"></textarea>
+   <div class="actions"><button id="change" disabled>平滑切换</button></div>
+   <p class="hint">提交后旧缓冲仍会先播完；准备期间可继续看画面、改下一条。</p>
+  </section>
+  <section id="prompt-history-panel">
+   <h2>提示词历史</h2>
+   <ol id="history-list"></ol>
+  </section>
+ </aside>
+</main>
+<section id="gpu-monitor"><div class="monitor-heading"><h2>显存监控</h2><small id="memory-status">正在读取…</small></div><div id="memory-summary">—</div><div id="gpu-grid"></div><p class="hint">每秒刷新设备实际占用。重新生成后 CUDA 缓存可能仍保留。</p></section>
+<script>
+const video=document.querySelector('#screen'),status=document.querySelector('#status');
+const startButton=document.querySelector('#start'),changeButton=document.querySelector('#change'),pauseButton=document.querySelector('#pause');
+let token='',currentState=null,player=null,starting=false,polling=false,metricsBusy=false,appMessage='',lastPollError='';
+// Observability only: no changes to download concurrency, watermarks or cutovers.
+function createTrace(){
+ const page=crypto.randomUUID(),queue=[],recent=[];let seq=0,requestSeq=0,dropped=0,busy=false,lastFlush=0,relayRun='';
+ const note=document.querySelector('#trace-status'),networkStarts=[];
+ function request(id,path,begin,session){networkStarts.push({id,url:new URL(path.replace(/^\//,''),location.href).href,begin,session});if(networkStarts.length>512)networkStarts.shift();}
+ function event(name,data={},session=currentState?.session_id){try{
+  const row={event:name,seq:++seq,mono_ms:performance.now(),wall_ms:Date.now(),session_id:session||null,data};
+  recent.push(row);if(recent.length>1800)recent.shift();queue.push(row);if(queue.length>1800){queue.shift();dropped++;}
+ }catch{}}
+ async function flush(final=false){
+  if(busy||!token||!queue.length)return;busy=true;let delivered=false;const selected=[];let bytes=100;
+  for(const row of queue){const size=new TextEncoder().encode(JSON.stringify(row)).length+1;if(selected.length>=96||bytes+size>48000)break;selected.push(row);bytes+=size;}
+  if(!selected.length){queue.shift();dropped++;busy=false;return;}
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),5000),sent=Date.now(),mono=performance.now();
+  try{
+   const r=await fetch('trace',{method:'POST',signal:controller.signal,keepalive:final,headers:{'Content-Type':'application/json','X-Client-Id':token,'X-Session-Id':currentState?.session_id||''},body:JSON.stringify({page,events:selected})});
+   if(!r.ok)throw Error(`HTTP ${r.status}`);const result=await r.json();
+   if(result.accepted!==selected.length||result.writer_error)throw Error('日志写入暂不可用');
+   const last=selected.at(-1).seq;while(queue.length&&queue[0].seq<=last)queue.shift();lastFlush=Date.now();relayRun=result.relay_run;delivered=true;
+   note.textContent=`诊断日志记录中（网络阶段） · ${page.slice(0,8)}${dropped||result.dropped?' · 有日志丢失':''}`;
+   event('trace_delivery',{roundtrip_ms:performance.now()-mono,server_wall_ms:result.server_wall_ms,client_sent_wall_ms:sent,client_received_wall_ms:Date.now(),queued:queue.length,dropped,relay_dropped:result.dropped});
+  }catch(e){note.textContent=`诊断日志待上传 · ${page.slice(0,8)} · 本地保留 ${queue.length} 条`;}
+  finally{clearTimeout(timeout);busy=false;if(delivered&&queue.length>32)setTimeout(flush,500);}
+ }
+ setInterval(flush,2000);
+ document.addEventListener('visibilitychange',()=>event('visibility',{visibility:document.visibilityState,player:player?.info()}));
+ window.addEventListener('pagehide',()=>{event('pagehide',{player:player?.info()});void flush(true);});
+ window.addEventListener('error',e=>event('page_error',{message:e.message}));
+ try{new PerformanceObserver(list=>{for(const x of list.getEntries())if(x.duration>=100)event('main_thread_long_task',{start_ms:x.startTime,duration_ms:x.duration});}).observe({type:'longtask',buffered:false});}catch{}
+ try{
+  performance.setResourceTimingBufferSize(512);
+  performance.addEventListener('resourcetimingbufferfull',()=>performance.clearResourceTimings());
+  new PerformanceObserver(list=>{for(const x of list.getEntries()){
+   if(x.initiatorType!=='fetch')continue;
+   // Register immediately before fetch; correlate by URL and nearest start time.
+   let best=-1,distance=Infinity;
+   for(let i=0;i<networkStarts.length;i++){const y=networkStarts[i],delta=x.startTime-y.begin;if(y.url===x.name&&delta>=-2&&delta<distance){best=i;distance=delta;}}
+   if(best<0||distance>1000)continue;const y=networkStarts.splice(best,1)[0];
+   const times=Object.fromEntries(['startTime','fetchStart','workerStart','domainLookupStart','domainLookupEnd','connectStart','connectEnd','secureConnectionStart','requestStart','responseStart','responseEnd','duration'].map(k=>[k,x[k]]));
+   event('network_timing',{request_id:y.id,path:new URL(x.name).pathname,match_delta_ms:distance,times,
+    pre_request_ms:x.requestStart>0?x.requestStart-x.fetchStart:null,
+    dns_ms:x.domainLookupEnd-x.domainLookupStart,connect_ms:x.connectEnd-x.connectStart,
+    response_wait_ms:x.requestStart>0&&x.responseStart>0?x.responseStart-x.requestStart:null,
+    response_body_ms:x.responseStart>0?x.responseEnd-x.responseStart:null,
+    next_hop_protocol:x.nextHopProtocol,transfer_bytes:x.transferSize,encoded_body_bytes:x.encodedBodySize,response_status:x.responseStatus},y.session);
+  }}).observe({type:'resource',buffered:false});
+ }catch(e){event('network_timing_unavailable',{error:e.message});}
+ event('page_load',{visibility:document.visibilityState,viewport:[innerWidth,innerHeight],online:navigator.onLine,build:'20261111-live-v1'});
+ return {event,flush,request,nextRequest:()=>`${page}.${++requestSeq}`,status:()=>({page,relayRun,queued:queue.length,dropped,lastFlush}),recent:()=>recent.slice()};
+}
+const trace=createTrace();window.wavertTrace=trace;
+function briefState(s){return Object.fromEntries(['session_id','generation','active','played','end','offer','pending','paused','busy','resetting','has_session','error','output_bytes'].map(k=>[k,s[k]]));}
+
+async function api(path,body,sessionId=currentState?.session_id,signal){
+ const requestId=trace.nextRequest(),begin=performance.now();
+ const fields={path,request_id:requestId,body:body?Object.fromEntries(Object.entries(body).filter(([k])=>k!=='prompt')):undefined,prompt_chars:body?.prompt?.length};
+ if(['/start','/prompt','/choose'].includes(path))trace.event('api_begin',{...fields,player:player?.info()},sessionId);
+ try{
+  trace.request(requestId,path,performance.now(),sessionId);
+  const r=await fetch(path.replace(/^\//,''),{method:body===undefined?'GET':'POST',signal,headers:{'Content-Type':'application/json','X-Client-Id':token,'X-Session-Id':sessionId||'','X-Trace-Request':requestId},body:body===undefined?undefined:JSON.stringify(body)});
+  const headersMs=performance.now()-begin;let data;try{data=JSON.parse(await r.text());}catch{throw Error('未连接到 WaveRT 服务，请打开运行中的 demo 链接。');}
+  const elapsed=performance.now()-begin;
+  if(!['/state','/metrics'].includes(path)||elapsed>600||!r.ok)trace.event('api_end',{...fields,status:r.status,elapsed_ms:elapsed,headers_ms:headersMs,server_timing:r.headers.get('server-timing'),state:data.session_id?briefState(data):undefined},sessionId);
+  if(!r.ok)throw Error(data.detail||r.statusText);return data;
+ }catch(e){trace.event('api_error',{...fields,elapsed_ms:performance.now()-begin,error:e.message},sessionId);throw e;}
+}
+function formatWall(wall){
+ if(wall==null)return '—';
+ const d=new Date(wall*1000),now=new Date();
+ const sameDay=d.toDateString()===now.toDateString();
+ const t=d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+ return sameDay?t:d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+}
+function renderHistory(s){
+ const box=document.querySelector('#current-prompt'),list=document.querySelector('#history-list');
+ box.textContent=s?.has_session?(s.current_prompt||s.initial_prompt||''):'';
+ const rows=[...(s?.prompt_history||[])];
+ list.replaceChildren(...rows.map((row,i)=>{
+  const li=document.createElement('li');
+  const pending=!!s?.pending&&i===rows.length-1&&row.kind==='switch';
+  li.className=pending?'pending':(row.kind==='switch'?'switch':'start');
+  const kind=row.kind==='start'?'起始':(pending?`切换中 · 自 chunk ${row.start??'—'}`:`切换 · chunk ${row.start??'—'}`);
+  li.innerHTML=`<div class="meta"><span>${formatWall(row.wall)}</span><span>${kind}</span><span>#${i+1}</span></div>`;
+  const text=document.createElement('div');text.className='text';text.textContent=row.text||'';li.append(text);
+  return li;
+ }).reverse());
+}
+function controls(){
+ const s=currentState;startButton.disabled=!token||starting||!s||s.resetting||!!s.error;
+ startButton.textContent=starting||s?.resetting?'正在准备…':s?.has_session?'重新生成':'开始生成';
+ changeButton.disabled=!s?.has_session||s.resetting||starting||!!s.error||!!s.pending;
+ pauseButton.disabled=!player||s?.resetting||starting;
+ pauseButton.textContent=player?.info().paused?'继续播放':'暂停播放';
+ renderHistory(s);
+ if(appMessage)status.textContent=appMessage;
+ else if(s?.error)status.textContent=s.error;
+ else if(s?.resetting)status.textContent='正在清理上一段内容，准备新的生成…';
+ else if(!s?.has_session)status.textContent='模型已就绪。在右侧输入初始提示词后开始；开始后可边看边改。';
+ else player?.render();
+}
+function acceptState(next){
+ if(currentState&&next.generation<currentState.generation)return;
+ const changed=!currentState||next.session_id!==currentState.session_id;
+ if(!currentState||JSON.stringify(briefState(currentState))!==JSON.stringify(briefState(next)))trace.event('state_observed',{state:briefState(next),player:player?.info()},next.session_id);
+ currentState=next;
+ if(changed){
+  player?.stop();player=null;
+  document.querySelector('#initial-prompt').value=next.initial_prompt||'';
+  if(next.has_session)player=createPlayer(next);
+ }else player?.update(next);
+ controls();
+}
+async function poll(){
+ if(polling||!token)return;polling=true;
+ try{if(appMessage===lastPollError)appMessage='';acceptState(await api('/state'));lastPollError='';}catch(e){lastPollError=e.message;appMessage=e.message;controls();}finally{polling=false;}
+}
+startButton.onclick=async()=>{
+ const prompt=document.querySelector('#initial-prompt').value.trim();if(!prompt){appMessage='请先输入初始提示词。';controls();document.querySelector('#initial-prompt').focus();return;}
+ starting=true;appMessage='';controls();
+ try{acceptState(await api('/start',{prompt,request_id:crypto.randomUUID()}));document.querySelector('#prompt').value='';}catch(e){appMessage=e.message;}
+ finally{starting=false;controls();void poll();}
+};
+async function submitChange(){
+ const box=document.querySelector('#prompt'),prompt=box.value.trim();
+ if(!prompt){appMessage='请先输入下一段描述。';controls();box.focus();return;}
+ try{appMessage='';changeButton.disabled=true;await api('/prompt',{prompt});box.value='';void poll();}
+ catch(e){appMessage=e.message;controls();}
+}
+changeButton.onclick=()=>{void submitChange();};
+document.querySelector('#prompt').addEventListener('keydown',e=>{
+ if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();if(!changeButton.disabled)void submitChange();}
+});
+pauseButton.onclick=()=>{player?.togglePause();controls();};
+function memoryView(data){
+ const summary=document.querySelector('#memory-summary'),note=document.querySelector('#memory-status'),grid=document.querySelector('#gpu-grid');
+ const gib=n=>n==null?'—':(n/1024).toFixed(1);
+ note.textContent=data.status==='ok'?'实时 · 每秒刷新':data.status==='stale'?`数据延迟 · ${Math.round(data.age_seconds||0)} 秒前`:'监控暂不可用';
+ summary.textContent=data.gpus?.length?`总占用 ${gib(data.used_mib)} / ${gib(data.total_mib)} GiB`:'等待 GPU 数据…';
+ for(const gpu of data.gpus||[]){
+  let card=document.getElementById(`gpu-${gpu.index}`);
+  if(!card){card=document.createElement('div');card.className='gpu';card.id=`gpu-${gpu.index}`;card.innerHTML='<b></b><div class="memory"></div><progress max="100"></progress><small></small>';grid.append(card);}
+  card.querySelector('b').textContent=`GPU ${gpu.index} · ${gpu.role}`;card.title=gpu.name;
+  card.querySelector('.memory').textContent=`${gib(gpu.used_mib)} / ${gib(gpu.total_mib)} GiB`;
+  const bar=card.querySelector('progress');bar.hidden=gpu.used_mib==null||!gpu.total_mib;bar.value=gpu.total_mib?100*gpu.used_mib/gpu.total_mib:0;
+  card.querySelector('small').textContent=`GPU 利用率 ${gpu.utilization_percent==null?'—':gpu.utilization_percent+'%'}`;
+ }
+}
+async function metrics(){if(metricsBusy||!token)return;metricsBusy=true;try{memoryView(await api('/metrics'));}catch{document.querySelector('#memory-status').textContent='监控连接暂不可用';}finally{metricsBusy=false;}}
+function createPlayer(initial){
+ const sessionId=initial.session_id,abort=new AbortController(),cache=new Map(),fetching=new Map(),retryAt=new Map();
+ let state=initial,media,source,url,branch=initial.active,appendChunk=initial.played+1,timeline=[{branch,start:appendChunk}];
+ const origin=appendChunk===0?0:(12*appendChunk-3)/state.fps;
+ let started=false,paused=false,pumping=false,deciding=false,dead=false,closed=false,acked=initial.played,ackBusy=false,presented=0;
+ let underruns=0,starving=false,receivedBytes=0,switches=0,message='',lastTrim=0,maxSwitchAppendMs=0,frameHandle;
+ let stallSince=null,lastFrameWall=null,lastFrameMedia=null,lastWaitReason='';
+ let liveMode=true,liveBusy=false,liveResume=null,liveAfter=appendChunk-1;
+ const record=(event,data={})=>trace.event(event,data,sessionId);
+ const call=(path,body)=>api(path,body,sessionId,abort.signal),key=(b,c)=>`${b}:${c}`;
+ const start=c=>(c===0?0:(12*c-3)/state.fps)-origin;
+ const nextChunk=t=>Math.floor(((origin+t)*state.fps+3+1e-4)/12);
+ const branchAt=c=>{for(let i=timeline.length-1;i>=0;i--)if(c>=timeline[i].start)return timeline[i].branch;return branch;};
+ function ahead(){for(let i=0;i<video.buffered.length;i++)if(video.currentTime>=video.buffered.start(i)-.05&&video.currentTime<video.buffered.end(i))return video.buffered.end(i)-video.currentTime;return 0;}
+ function render(){if(closed||appMessage||currentState?.resetting||currentState?.error)return;status.textContent=message||`${paused?'已暂停':started?'播放中':'正在缓冲'} · 视频缓冲 ${ahead().toFixed(1)} 秒 · ${deciding?'正在衔接新内容':state.pending||state.offer?'正在准备新内容':'可输入新的描述'} · 缓冲不足次数 ${underruns}`;}
+ function fail(e,fatal=false){if(closed||e.name==='AbortError')return;record('player_error',{error:e.message,fatal,player:detail()});message=e.message;dead||=fatal;render();}
+ function wakeLive(){const r=liveResume;liveResume=null;r?.();}
+ function waitWhilePaused(){return paused&&!closed?new Promise(resolve=>{liveResume=resolve;}):Promise.resolve();}
+ function acceptChunk(b,c,bytes,meta={}){
+  const k=key(b,c);if(closed||cache.has(k))return;
+  receivedBytes+=bytes.byteLength;cache.set(k,bytes);retryAt.delete(k);
+  record('media_end',{branch:b,chunk:c,bytes:bytes.byteLength,discarded:false,buffered_seconds:ahead(),transport:liveMode?'live':'pull',...meta});
+  liveAfter=Math.max(liveAfter,c);void pump();
+ }
+ function download(b,c){
+  const k=key(b,c);if(liveMode||cache.has(k)||fetching.has(k)||(retryAt.get(k)||0)>performance.now())return;
+  const begin=performance.now(),rid=trace.nextRequest();let headersMs=null,upstream=null;
+  record('media_begin',{branch:b,chunk:c,request_id:rid,candidate:b!==branch,buffered_seconds:ahead(),inflight:Array.from(fetching.keys()),offer:state.offer,append_chunk:appendChunk,transport:'pull'});
+  const promise=(async()=>{trace.request(rid,`chunk/${b}/${c}`,performance.now(),sessionId);const r=await fetch(`chunk/${b}/${c}`,{signal:abort.signal,headers:{'X-Client-Id':token,'X-Session-Id':sessionId,'X-Trace-Request':rid}});headersMs=performance.now()-begin;upstream=r.headers.get('server-timing');if(!r.ok)throw Error(`视频片段下载失败 (${r.status})`);const bytes=await r.arrayBuffer();
+   acceptChunk(b,c,bytes,{request_id:rid,elapsed_ms:performance.now()-begin,headers_ms:headersMs,server_timing:upstream});
+  })().catch(e=>{record('media_error',{branch:b,chunk:c,request_id:rid,elapsed_ms:performance.now()-begin,headers_ms:headersMs,error:e.message,cancelled:closed});if(!closed){retryAt.set(k,performance.now()+700);fail(e);}}).finally(()=>{fetching.delete(k);void pump();});fetching.set(k,promise);
+ }
+ function fillDownloads(){
+  if(liveMode){void runLive();return;}
+  const normal=[],candidate=[],offer=!deciding&&state.offer;
+  for(let c=appendChunk;c<Math.min(state.end,nextChunk(video.currentTime)+16);c++)normal.push([branch,c]);
+  if(offer)for(let c=offer.start;c<offer.end;c++)candidate.push([offer.branch,c]);
+  const jobs=ahead()<1.5?[...normal.slice(0,3),...candidate,...normal.slice(3)]:[...candidate,...normal];
+  for(const [b,c] of jobs){if(fetching.size>=2)break;download(b,c);}
+ }
+ async function runLive(){
+  if(!liveMode||liveBusy||closed||dead||state.resetting)return;liveBusy=true;
+  const from=Math.max(appendChunk-1,liveAfter),begin=performance.now(),rid=trace.nextRequest();
+  record('live_begin',{after:from,append_chunk:appendChunk,request_id:rid,buffered_seconds:ahead()});
+  try{
+   trace.request(rid,`live?after=${from}`,performance.now(),sessionId);
+   const r=await fetch(`live?after=${from}`,{signal:abort.signal,headers:{'X-Client-Id':token,'X-Session-Id':sessionId,'X-Trace-Request':rid}});
+   if(!r.ok||!r.body)throw Error(`直播流连接失败 (${r.status})`);
+   const reader=r.body.getReader();let buf=new Uint8Array(0),headersMs=performance.now()-begin;
+   const high=()=>(state.start_buffer||3)+2;
+   record('live_open',{after:from,request_id:rid,headers_ms:headersMs});
+   while(!closed){
+    await waitWhilePaused();if(closed)break;
+    // TCP/backpressure: stop pulling once the local cache covers the buffer.
+    while(!closed&&!paused&&cache.size>=high())await new Promise(r=>setTimeout(r,40));
+    if(closed)break;
+    const {done,value}=await reader.read();if(done)break;
+    const merged=new Uint8Array(buf.length+value.length);merged.set(buf);merged.set(value,buf.length);buf=merged;
+    while(buf.length>=8){
+     const view=new DataView(buf.buffer,buf.byteOffset,buf.byteLength),chunkId=view.getUint32(0),size=view.getUint32(4);
+     if(size>8*1024*1024)throw Error('直播流分片过大');
+     if(buf.length<8+size)break;
+     const bytes=buf.slice(8,8+size).buffer;buf=buf.slice(8+size);
+     record('media_begin',{branch:0,chunk:chunkId,request_id:rid,candidate:false,buffered_seconds:ahead(),inflight:['live'],offer:state.offer,append_chunk:appendChunk,transport:'live'});
+     acceptChunk(0,chunkId,bytes,{request_id:rid,elapsed_ms:performance.now()-begin,headers_ms:headersMs});
+    }
+   }
+   record('live_end',{after:liveAfter,request_id:rid,elapsed_ms:performance.now()-begin,closed});
+  }catch(e){
+   if(closed||e.name==='AbortError')return;
+   record('live_error',{error:e.message,after:liveAfter,elapsed_ms:performance.now()-begin});
+   liveMode=false;message='推流中断，已回退到逐段拉取';fail(e);
+  }finally{liveBusy=false;if(!closed&&liveMode&&!dead)setTimeout(()=>{void runLive();},400);void pump();}
+ }
+ function operation(action){return new Promise((resolve,reject)=>{
+  const cleanup=()=>{source.removeEventListener('updateend',done);source.removeEventListener('error',error);abort.signal.removeEventListener('abort',cancel);};
+  const done=()=>{cleanup();resolve();},error=()=>{cleanup();reject(Error('浏览器视频缓冲出错，请重新生成或刷新。'));},cancel=()=>{cleanup();reject(new DOMException('Generation replaced','AbortError'));};
+  if(closed){cancel();return;}source.addEventListener('updateend',done,{once:true});source.addEventListener('error',error,{once:true});abort.signal.addEventListener('abort',cancel,{once:true});try{action();}catch(e){cleanup();reject(e);}
+ });}
+ async function append(b,c){if(closed)throw new DOMException('Generation replaced','AbortError');const begin=performance.now(),before=ranges();source.timestampOffset=start(c);await operation(()=>source.appendBuffer(cache.get(key(b,c))));record('append',{branch:b,chunk:c,elapsed_ms:performance.now()-begin,offset:start(c),before,after:ranges(),current_time:video.currentTime});}
+ async function rejectOffer(offer){record('offer_reject',{offer,lead_seconds:start(offer.start)-video.currentTime,player:detail()});deciding=true;try{await call('/choose',{branch:offer.branch,accept:false,next_chunk:nextChunk(video.currentTime)});}catch(e){fail(e);}finally{if(state.offer?.branch===offer.branch)state.offer=null;deciding=false;}}
+ async function switchIfReady(){
+  const offer=state.offer;if(!offer||deciding||offer.branch===branch)return false;
+  if(start(offer.start)-video.currentTime<.25){void rejectOffer(offer);return false;}
+  if(appendChunk<offer.start){waitReason('old_bridge',offer);return false;}for(let c=offer.start;c<offer.end;c++)if(!cache.has(key(offer.branch,c))){waitReason('candidate_'+c,offer);return false;}
+  lastWaitReason='';
+  deciding=true;try{
+   const editStarted=performance.now();record('switch_edit_begin',{offer,lead_seconds:start(offer.start)-video.currentTime,player:detail()});
+   if(source.buffered.length&&source.buffered.end(source.buffered.length-1)>start(offer.start)){await operation(()=>source.remove(start(offer.start),Infinity));record('switch_tail_removed',{offer,player:detail()});}
+   for(let c=offer.start;c<offer.end;c++)await append(offer.branch,c);
+   if(closed)return true;maxSwitchAppendMs=Math.max(maxSwitchAppendMs,performance.now()-editStarted);
+   timeline.push({branch:offer.branch,start:offer.start});branch=offer.branch;appendChunk=offer.end;switches++;
+   record('switch_appended',{offer,edit_ms:performance.now()-editStarted,player:detail()});
+   const chosen=await call('/choose',{branch:offer.branch,accept:true,next_chunk:offer.start});state={...state,...chosen};message='';record('switch_confirmed',{offer,player:detail()});
+  }catch(e){fail(e,true);}finally{deciding=false;}return true;
+ }
+ async function pump(){
+  if(pumping||!source||closed||dead||state.resetting)return;pumping=true;
+  try{
+   fillDownloads();if(!await switchIfReady())while(!closed&&appendChunk<state.end&&cache.has(key(branch,appendChunk))){await append(branch,appendChunk);appendChunk++;}
+   if(closed)return;
+   if(!started&&ahead()>=(state.start_buffer*12-3)/state.fps-.05){started=true;record('initial_buffer_ready',{player:detail()});if(!paused)await video.play();}
+   if(video.currentTime-lastTrim>10){lastTrim=video.currentTime;await operation(()=>source.remove(0,Math.max(0,video.currentTime-8)));}
+   const floor=nextChunk(video.currentTime)-1;
+   for(const k of cache.keys()){const [b,c]=k.split(':').map(Number);if(c<floor||(b!==branch&&b!==state.offer?.branch&&c>=appendChunk))cache.delete(k);}
+   for(const k of retryAt.keys())if(Number(k.split(':')[1])<floor)retryAt.delete(k);
+   while(timeline.length>1&&timeline[1].start<=floor)timeline.shift();fillDownloads();
+  }catch(e){fail(e,true);}finally{pumping=false;render();}
+ }
+ async function acknowledge(){
+  if(ackBusy||deciding||!started||closed||dead)return;const completed=nextChunk(presented)-1;if(completed<=acked)return;
+  ackBusy=true;const local=new AbortController(),timer=setTimeout(()=>local.abort(),1000);
+  const onParent=()=>local.abort();abort.signal.addEventListener('abort',onParent);
+  try{
+   // A stuck /played used to park generation for seconds; time out and retry.
+   const next=await api('/played',{branch:branchAt(completed),chunk:completed},sessionId,local.signal);
+   acked=completed;
+   if(next?.session_id===sessionId){state={...state,...next};if(currentState?.session_id===sessionId)currentState={...currentState,...next};}
+  }catch(e){if(e.name!=='AbortError')fail(e);}
+  finally{clearTimeout(timer);abort.signal.removeEventListener('abort',onParent);ackBusy=false;}
+ }
+ function frame(now,metadata){if(closed)return;if(lastFrameWall!=null&&now-lastFrameWall>180)record('frame_gap',{wall_gap_ms:now-lastFrameWall,media_gap_seconds:metadata.mediaTime-lastFrameMedia,visibility:document.visibilityState,player:detail()});lastFrameWall=now;lastFrameMedia=metadata.mediaTime;presented=metadata.mediaTime;starving=false;void acknowledge();frameHandle=video.requestVideoFrameCallback(frame);}
+ const waiting=()=>{const counted=started&&!paused&&video.currentTime>.05&&!starving;if(counted){underruns++;starving=true;stallSince??=performance.now();render();}record('waiting',{counted,player:detail()});},playing=()=>{record('playing',{stall_ms:stallSince==null?null:performance.now()-stallSince,player:detail()});stallSince=null;starving=false;},error=()=>fail(Error(`视频解码失败 (${video.error?.code})，请重新生成。`),true);
+ video.addEventListener('waiting',waiting);video.addEventListener('playing',playing);video.addEventListener('error',error);
+ function ranges(){const result=[];for(let i=0;i<video.buffered.length;i++)result.push([video.buffered.start(i),video.buffered.end(i)]);return result;}
+ function detail(){return {branch,acked,appendChunk,currentTime:video.currentTime,presented,origin,bufferedSeconds:ahead(),ranges:ranges(),readyState:video.readyState,networkState:video.networkState,videoPaused:video.paused,started,paused,pumping,deciding,ackBusy,dead,underruns,switches,liveMode,liveBusy,liveAfter,state:briefState(state),inflight:liveMode?(liveBusy?['live']:[]):Array.from(fetching.keys()),cache:Array.from(cache.keys()).slice(-40),droppedFrames:video.getVideoPlaybackQuality()?.droppedVideoFrames,visibility:document.visibilityState};}
+ function waitReason(reason,offer){const id=`${offer.branch}:${reason}`;if(id!==lastWaitReason){lastWaitReason=id;record('switch_wait',{reason,offer,lead_seconds:start(offer.start)-video.currentTime,player:detail()});}}
+ const sampleTimer=setInterval(()=>record('sample',{player:detail()}),1000);
+ record('player_created',{initial:briefState(initial),origin});
+ const pumpTimer=setInterval(pump,60),ackTimer=setInterval(acknowledge,100);
+ (async()=>{try{
+  if(!window.MediaSource||!MediaSource.isTypeSupported(state.mime)||!video.requestVideoFrameCallback)throw Error('当前浏览器不支持视频流，请使用新版 Chrome、Edge 或 Safari。');
+  media=new MediaSource();url=URL.createObjectURL(media);video.muted=true;video.src=url;
+  await new Promise((resolve,reject)=>{const done=()=>{abort.signal.removeEventListener('abort',cancel);resolve();},cancel=()=>{media.removeEventListener('sourceopen',done);reject(new DOMException('Generation replaced','AbortError'));};media.addEventListener('sourceopen',done,{once:true});abort.signal.addEventListener('abort',cancel,{once:true});});
+  if(closed)return;source=media.addSourceBuffer(state.mime);source.mode='segments';media.duration=Infinity;frameHandle=video.requestVideoFrameCallback(frame);void pump();
+ }catch(e){fail(e,true);}})();
+ return {update(next){if(next.active===branch)state=next;render();void pump();},render,
+  async togglePause(){record('pause_toggle',{to:!paused,player:detail()});paused=!paused;if(paused)video.pause();else{wakeLive();if(started)try{await video.play();}catch(e){fail(e);}}render();controls();},
+  info:()=>({session_id:sessionId,started,paused,underruns,switches,branch,acked,appendChunk,receivedBytes,maxSwitchAppendMs,bufferedSeconds:ahead(),currentTime:video.currentTime,presented,deciding,dead,message,cacheEntries:cache.size,liveMode,liveAfter,videoQuality:video.getVideoPlaybackQuality()?.droppedVideoFrames}),
+  stop(){record('player_stop',{player:detail()});closed=true;wakeLive();clearInterval(sampleTimer);clearInterval(pumpTimer);clearInterval(ackTimer);abort.abort();if(frameHandle!=null)video.cancelVideoFrameCallback(frameHandle);video.removeEventListener('waiting',waiting);video.removeEventListener('playing',playing);video.removeEventListener('error',error);video.pause();video.removeAttribute('src');video.load();if(url)URL.revokeObjectURL(url);cache.clear();}
+ };
+}
+window.wavertDiagnostics=()=>player?.info()||{session_id:currentState?.session_id,started:false,idle:!currentState?.has_session};
+(async()=>{try{
+ try{token=sessionStorage.getItem('wavert-viewer')||'';}catch{}
+ token=(await api('/attach',{})).client;try{sessionStorage.setItem('wavert-viewer',token);}catch{}
+ acceptState(await api('/state'));setInterval(poll,150);setInterval(metrics,1000);void metrics();
+ }catch(e){appMessage=e.message;controls();}})();
+</script></html>
